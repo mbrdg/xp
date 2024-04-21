@@ -1,18 +1,21 @@
+use crate::{crdt::GSet, sync::Baseline};
 use rand::distributions::{Alphanumeric, DistString};
-use xp::GSet;
+use sync::Algorithm;
+
+mod crdt;
+mod sync;
 
 #[derive(Debug)]
-struct Config {
+pub struct Config {
     item_count: usize,
     item_size: usize,
     similarity: u8,
 }
 
-fn fill(config: &Config) -> (GSet<String>, GSet<String>) {
+fn fill(config: Config) -> (GSet<String>, GSet<String>) {
     assert!(
         (0..101).contains(&config.similarity),
-        "similariry given is not a percentage, got {}",
-        config.similarity
+        "similariry must be a percentage, i.e, a value between 0 and 100",
     );
 
     let sim_items = config.item_count * usize::from(config.similarity) / 100;
@@ -39,21 +42,15 @@ fn fill(config: &Config) -> (GSet<String>, GSet<String>) {
     gsets
 }
 
-fn sync<T>(primary: &mut GSet<T>, secondary: &mut GSet<T>) {
-    todo!()
-}
-
 fn main() {
     let config = Config {
-        item_count: 10,
-        item_size: 5,
-        similarity: 100,
+        item_count: 10000,
+        item_size: 80,
+        similarity: 50,
     };
-
-    let (mut local, mut remote) = fill(&config);
     println!("{:?}", config);
-    println!("{:?}", local);
-    println!("{:?}", remote);
 
-    sync(&mut local, &mut remote);
+    let (local, remote) = fill(config);
+    let mut baseline = Baseline::new(local, remote);
+    println!("{:?}", baseline.sync());
 }
