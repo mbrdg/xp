@@ -14,7 +14,7 @@ pub struct Config {
 
 fn fill(config: Config) -> (GSet<String>, GSet<String>) {
     assert!(
-        (0..101).contains(&config.similarity),
+        (0..=100).contains(&config.similarity),
         "similariry must be a percentage, i.e, a value between 0 and 100",
     );
 
