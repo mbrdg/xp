@@ -98,6 +98,7 @@ mod tests {
         splittable.insert(1);
         splittable.insert(2);
         splittable.insert(2);
+        assert_eq!(splittable.len(), 2);
 
         let decompositions = splittable.split();
         assert_eq!(decompositions.len(), splittable.len());
@@ -106,30 +107,37 @@ mod tests {
 
         joinable.join(decompositions);
         assert_eq!(joinable.len(), splittable.len());
-
         assert!(joinable.contains(&1));
         assert!(joinable.contains(&2));
     }
 
     #[test]
     fn test_difference() {
-        let mut local = GSet::new();
-        let mut remote = GSet::new();
-
-        local.insert(0);
-        local.insert(1);
-        local.insert(2);
-
-        remote.insert(2);
-        remote.insert(3);
-        remote.insert(4);
+        let local = GSet {
+            base: HashSet::from_iter(0..=2),
+        };
+        let remote = GSet {
+            base: HashSet::from_iter(2..=4),
+        };
 
         let diff = local.difference(&remote);
-
         assert!(diff.contains(&0));
         assert!(diff.contains(&1));
         assert!(!diff.contains(&2));
         assert!(!diff.contains(&3));
         assert!(!diff.contains(&4));
+    }
+
+    #[test]
+    fn test_difference_synced() {
+        let local = GSet {
+            base: HashSet::from_iter(0..3),
+        };
+        let remote = local.clone();
+
+        assert_eq!(local.elements(), remote.elements());
+
+        let diff = local.difference(&remote);
+        assert!(diff.is_empty());
     }
 }
