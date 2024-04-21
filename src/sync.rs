@@ -4,6 +4,7 @@ use crate::crdt::{Decomposable, GSet};
 pub struct Metrics {
     bytes_exchanged: usize,
     round_trips: u8,
+    false_matches: usize,
 }
 
 pub type Replica = GSet<String>;
@@ -47,8 +48,13 @@ impl Algorithm for Baseline {
         // 3. Merge the minimum delta from the remote peer
         self.local.join(vec![local_unseen]);
 
-        // 4. sanity check
-        assert_eq!(self.local.elements(), self.remote.elements());
+        // 4. sanity check, i.e., false matches must be 0
+        metrics.false_matches = self
+            .local
+            .elements()
+            .symmetric_difference(self.remote.elements())
+            .count();
+
         metrics
     }
 }
