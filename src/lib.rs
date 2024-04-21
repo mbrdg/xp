@@ -17,16 +17,20 @@ impl<T> GSet<T>
 where
     T: Eq + Hash + Clone,
 {
+    #[inline]
+    #[must_use]
     pub fn new() -> Self {
         Self {
             base: HashSet::new(),
         }
     }
 
+    #[inline]
     pub fn contains(&self, value: &T) -> bool {
         self.base.contains(value)
     }
 
+    #[inline]
     pub fn elements(&self) -> &HashSet<T> {
         &self.base
     }
@@ -43,10 +47,12 @@ where
         }
     }
 
+    #[inline]
     pub fn is_empty(&self) -> bool {
         self.base.is_empty()
     }
 
+    #[inline]
     pub fn len(&self) -> usize {
         self.base.len()
     }
