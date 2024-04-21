@@ -1,18 +1,22 @@
 use crate::{crdt::GSet, sync::Baseline};
-use rand::distributions::{Alphanumeric, DistString};
+use rand::{
+    distributions::{Alphanumeric, DistString},
+    SeedableRng,
+};
 use sync::Algorithm;
 
 mod crdt;
 mod sync;
 
 #[derive(Debug)]
-pub struct Config {
+pub struct Config<'a> {
     item_count: usize,
     item_size: usize,
     similarity: u8,
+    seed: &'a [u8; 16],
 }
 
-fn fill(config: Config) -> (GSet<String>, GSet<String>) {
+fn gen_items(config: Config) -> (GSet<String>, GSet<String>) {
     assert!(
         (0..=100).contains(&config.similarity),
         "similariry must be a percentage, i.e, a value between 0 and 100",
@@ -23,7 +27,7 @@ fn fill(config: Config) -> (GSet<String>, GSet<String>) {
 
     let mut gsets = (GSet::new(), GSet::new());
 
-    let mut rng = rand::thread_rng();
+    let mut rng = rand_pcg::Pcg64Mcg::from_seed(*config.seed);
 
     for _ in 0..sim_items {
         let item = Alphanumeric.sample_string(&mut rng, config.item_size);
@@ -47,10 +51,11 @@ fn main() {
         item_count: 10000,
         item_size: 80,
         similarity: 50,
+        seed: b"autobiographical",
     };
     println!("{:?}", config);
 
-    let (local, remote) = fill(config);
+    let (local, remote) = gen_items(config);
     let mut baseline = Baseline::new(local, remote);
     println!("{:?}", baseline.sync());
 }
