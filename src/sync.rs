@@ -1,5 +1,5 @@
 use std::{
-    hash::{DefaultHasher, Hash, Hasher},
+    hash::{BuildHasher, RandomState},
     mem::size_of,
 };
 
@@ -91,21 +91,22 @@ impl<const B: usize> Algorithm<GSet<String>> for BucketDispatcher<B> {
     fn sync(&mut self) -> Metrics {
         println!("=> BucketDispatcher w/ {} buckets", B);
         let mut metrics = Metrics::default();
+        let s = RandomState::new();
+
         const BUCKET: Vec<(GSet<String>, u64)> = Vec::new();
 
         let mut local_buckets = [BUCKET; B];
         self.local.split().into_iter().for_each(|decomposition| {
-            let mut hasher = DefaultHasher::new();
-            decomposition
-                .elements()
-                .iter()
-                .next()
-                .expect("decomposition should have a single item")
-                .hash(&mut hasher);
+            let hash = s.hash_one(
+                decomposition
+                    .elements()
+                    .iter()
+                    .next()
+                    .expect("a decomposition should have a single item"),
+            );
 
-            let digest = hasher.finish();
-            let i = usize::try_from(digest).unwrap() % local_buckets.len();
-            local_buckets[i].push((decomposition, digest));
+            let i = usize::try_from(hash).unwrap() % local_buckets.len();
+            local_buckets[i].push((decomposition, hash));
         });
 
         local_buckets
@@ -113,13 +114,11 @@ impl<const B: usize> Algorithm<GSet<String>> for BucketDispatcher<B> {
             .for_each(|bucket| bucket.sort_unstable_by_key(|k| k.1));
 
         let local_hashes = local_buckets.iter().map(|bucket| {
-            let mut hasher = DefaultHasher::new();
-            bucket
-                .iter()
-                .fold(String::new(), |h, k| h + k.1.to_string().as_str())
-                .hash(&mut hasher);
-
-            hasher.finish()
+            s.hash_one(
+                bucket
+                    .iter()
+                    .fold(String::new(), |h, k| h + k.1.to_string().as_str()),
+            )
         });
 
         metrics.bytes_exchanged += size_of::<u64>() * B;
@@ -127,15 +126,14 @@ impl<const B: usize> Algorithm<GSet<String>> for BucketDispatcher<B> {
 
         let mut remote_buckets = [BUCKET; B];
         self.remote.split().into_iter().for_each(|decomposition| {
-            let mut hasher = DefaultHasher::new();
-            decomposition
-                .elements()
-                .iter()
-                .next()
-                .expect("decomposition should have a single item")
-                .hash(&mut hasher);
+            let hash = s.hash_one(
+                decomposition
+                    .elements()
+                    .iter()
+                    .next()
+                    .expect("a decomposition should have a single item"),
+            );
 
-            let hash = hasher.finish();
             let i = usize::try_from(hash).unwrap() % remote_buckets.len();
             remote_buckets[i].push((decomposition, hash));
         });
@@ -148,13 +146,11 @@ impl<const B: usize> Algorithm<GSet<String>> for BucketDispatcher<B> {
             .iter_mut()
             .zip(local_hashes)
             .map(|(bucket, local_hash)| {
-                let mut hasher = DefaultHasher::new();
-                bucket
-                    .iter()
-                    .fold(String::new(), |h, k| h + k.1.to_string().as_str())
-                    .hash(&mut hasher);
-
-                let remote_hash = hasher.finish();
+                let remote_hash = s.hash_one(
+                    bucket
+                        .iter()
+                        .fold(String::new(), |h, k| h + k.1.to_string().as_str()),
+                );
 
                 let mut state = GSet::new();
                 if remote_hash != local_hash {
