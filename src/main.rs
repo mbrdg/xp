@@ -18,6 +18,7 @@ pub struct Config {
 }
 
 fn gen_items(config: Config) -> (GSet<String>, GSet<String>) {
+    println!("=> Generating items w/ {:?}", config);
     let sim_items = config.item_count * usize::from(config.similarity) / 100;
     let diff_items = config.item_count - sim_items;
 
@@ -54,10 +55,10 @@ fn main() {
         (0..=100).contains(&config.similarity),
         "similariry must be a percentage, i.e, a value between 0 and 100",
     );
-    println!("{:?}", config);
 
     let (local, remote) = gen_items(config);
+
     let mut dispatcher = BucketDispatcher::<16>::new(local, remote);
-    println!("{:?}", dispatcher.sync());
+    dispatcher.sync();
     assert!(dispatcher.is_synced());
 }

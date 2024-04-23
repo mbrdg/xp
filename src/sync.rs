@@ -34,7 +34,6 @@ impl Baseline {
 
 impl Algorithm<GSet<String>> for Baseline {
     fn sync(&mut self) -> Metrics {
-        println!("=> Baseline");
         let mut metrics = Metrics::default();
 
         // 1. Ship the full local state and send them to the remote peer
@@ -61,6 +60,7 @@ impl Algorithm<GSet<String>> for Baseline {
             .symmetric_difference(self.remote.elements())
             .count();
 
+        println!("=> Baseline\n\t=> {:?}", metrics);
         metrics
     }
 
@@ -89,7 +89,6 @@ impl<const B: usize> BucketDispatcher<B> {
 
 impl<const B: usize> Algorithm<GSet<String>> for BucketDispatcher<B> {
     fn sync(&mut self) -> Metrics {
-        println!("=> BucketDispatcher w/ {} buckets", B);
         let mut metrics = Metrics::default();
         let s = RandomState::new();
 
@@ -202,6 +201,7 @@ impl<const B: usize> Algorithm<GSet<String>> for BucketDispatcher<B> {
             .symmetric_difference(self.remote.elements())
             .count();
 
+        println!("=> BucketDispatcher w/ {} buckets\n\t=> {:?}", B, metrics);
         metrics
     }
 
