@@ -1,4 +1,4 @@
-use crate::{crdt::GSet, sync::Baseline};
+use crate::{crdt::GSet, sync::BucketDispatcher};
 use rand::{
     distributions::{Alphanumeric, DistString},
     rngs::StdRng,
@@ -57,6 +57,6 @@ fn main() {
     println!("{:?}", config);
 
     let (local, remote) = gen_items(config);
-    let mut baseline = Baseline::new(local, remote);
-    println!("{:?}", baseline.sync());
+    let mut dispatcher = BucketDispatcher::new(local, remote);
+    println!("{:?}", dispatcher.sync());
 }
