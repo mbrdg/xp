@@ -57,6 +57,7 @@ fn main() {
     println!("{:?}", config);
 
     let (local, remote) = gen_items(config);
-    let mut dispatcher = BucketDispatcher::new(local, remote);
+    let mut dispatcher = BucketDispatcher::<16>::new(local, remote);
     println!("{:?}", dispatcher.sync());
+    assert!(dispatcher.is_synced());
 }

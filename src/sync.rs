@@ -73,12 +73,12 @@ impl Algorithm<GSet<String>> for Baseline {
     }
 }
 
-pub struct BucketDispatcher {
+pub struct BucketDispatcher<const B: usize> {
     local: GSet<String>,
     remote: GSet<String>,
 }
 
-impl BucketDispatcher {
+impl<const B: usize> BucketDispatcher<B> {
     #[allow(dead_code)]
     #[inline]
     #[must_use]
@@ -87,15 +87,13 @@ impl BucketDispatcher {
     }
 }
 
-impl Algorithm<GSet<String>> for BucketDispatcher {
+impl<const B: usize> Algorithm<GSet<String>> for BucketDispatcher<B> {
     fn sync(&mut self) -> Metrics {
-        const NUM_OF_BUCKETS: usize = 6;
+        println!("=> BucketDispatcher w/ {} buckets", B);
+        let mut metrics = Metrics::default();
         const BUCKET: Vec<(GSet<String>, u64)> = Vec::new();
 
-        println!("=> BucketDispatcher");
-        let mut metrics = Metrics::default();
-
-        let mut local_buckets = [BUCKET; NUM_OF_BUCKETS];
+        let mut local_buckets = [BUCKET; B];
         self.local.split().into_iter().for_each(|decomposition| {
             let mut hasher = DefaultHasher::new();
             decomposition
@@ -124,10 +122,10 @@ impl Algorithm<GSet<String>> for BucketDispatcher {
             hasher.finish()
         });
 
-        metrics.bytes_exchanged += size_of::<u64>() * NUM_OF_BUCKETS;
+        metrics.bytes_exchanged += size_of::<u64>() * B;
         metrics.round_trips += 1;
 
-        let mut remote_buckets = [BUCKET; NUM_OF_BUCKETS];
+        let mut remote_buckets = [BUCKET; B];
         self.remote.split().into_iter().for_each(|decomposition| {
             let mut hasher = DefaultHasher::new();
             decomposition
@@ -169,7 +167,7 @@ impl Algorithm<GSet<String>> for BucketDispatcher {
 
         metrics.bytes_exchanged += non_matching_buckets
             .iter()
-            .map(BucketDispatcher::size_of)
+            .map(BucketDispatcher::<B>::size_of)
             .sum::<usize>();
         metrics.round_trips += 1;
 
@@ -184,10 +182,7 @@ impl Algorithm<GSet<String>> for BucketDispatcher {
             .zip(non_matching_buckets)
             .filter(|buckets| !buckets.1.is_empty())
             .fold(
-                (
-                    Vec::with_capacity(NUM_OF_BUCKETS),
-                    Vec::with_capacity(NUM_OF_BUCKETS),
-                ),
+                (Vec::with_capacity(B), Vec::with_capacity(B)),
                 |mut unseen, (local_bucket, non_matching_bucket)| {
                     unseen.0.push(non_matching_bucket.difference(&local_bucket));
                     unseen.1.push(local_bucket.difference(&non_matching_bucket));
@@ -199,7 +194,7 @@ impl Algorithm<GSet<String>> for BucketDispatcher {
 
         metrics.bytes_exchanged += remote_unseen
             .iter()
-            .map(BucketDispatcher::size_of)
+            .map(BucketDispatcher::<B>::size_of)
             .sum::<usize>();
         metrics.round_trips += 1;
 
