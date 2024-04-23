@@ -15,6 +15,7 @@ pub struct Metrics {
 pub trait Algorithm<R> {
     fn sync(&mut self) -> Metrics;
     fn size_of(replica: &R) -> usize;
+    fn is_synced(&self) -> bool;
 }
 
 pub struct Baseline {
@@ -33,6 +34,7 @@ impl Baseline {
 
 impl Algorithm<GSet<String>> for Baseline {
     fn sync(&mut self) -> Metrics {
+        println!("=> Baseline");
         let mut metrics = Metrics::default();
 
         // 1. Ship the full local state and send them to the remote peer
@@ -65,6 +67,10 @@ impl Algorithm<GSet<String>> for Baseline {
     fn size_of(replica: &GSet<String>) -> usize {
         replica.elements().iter().map(String::len).sum()
     }
+
+    fn is_synced(&self) -> bool {
+        self.local.elements() == self.remote.elements()
+    }
 }
 
 pub struct BucketDispatcher {
@@ -86,7 +92,7 @@ impl Algorithm<GSet<String>> for BucketDispatcher {
         const NUM_OF_BUCKETS: usize = 6;
         const BUCKET: Vec<(GSet<String>, u64)> = Vec::new();
 
-        println!("=> BucketDispatcher Sync");
+        println!("=> BucketDispatcher");
         let mut metrics = Metrics::default();
 
         let mut local_buckets = [BUCKET; NUM_OF_BUCKETS];
@@ -210,5 +216,9 @@ impl Algorithm<GSet<String>> for BucketDispatcher {
 
     fn size_of(replica: &GSet<String>) -> usize {
         replica.elements().iter().map(String::len).sum()
+    }
+
+    fn is_synced(&self) -> bool {
+        self.local.elements() == self.remote.elements()
     }
 }
