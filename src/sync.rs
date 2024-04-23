@@ -12,9 +12,11 @@ pub struct Metrics {
     false_matches: usize,
 }
 
-pub trait Algorithm<R> {
+pub trait Algorithm {
+    type Replica;
+
     fn sync(&mut self) -> Metrics;
-    fn size_of(replica: &R) -> usize;
+    fn size_of(replica: &Self::Replica) -> usize;
     fn is_synced(&self) -> bool;
 }
 
@@ -32,7 +34,9 @@ impl Baseline {
     }
 }
 
-impl Algorithm<GSet<String>> for Baseline {
+impl Algorithm for Baseline {
+    type Replica = GSet<String>;
+
     fn sync(&mut self) -> Metrics {
         let mut metrics = Metrics::default();
 
@@ -64,7 +68,7 @@ impl Algorithm<GSet<String>> for Baseline {
         metrics
     }
 
-    fn size_of(replica: &GSet<String>) -> usize {
+    fn size_of(replica: &Self::Replica) -> usize {
         replica.elements().iter().map(String::len).sum()
     }
 
@@ -87,7 +91,9 @@ impl<const B: usize> BucketDispatcher<B> {
     }
 }
 
-impl<const B: usize> Algorithm<GSet<String>> for BucketDispatcher<B> {
+impl<const B: usize> Algorithm for BucketDispatcher<B> {
+    type Replica = GSet<String>;
+
     fn sync(&mut self) -> Metrics {
         let mut metrics = Metrics::default();
         let s = RandomState::new();
@@ -205,7 +211,7 @@ impl<const B: usize> Algorithm<GSet<String>> for BucketDispatcher<B> {
         metrics
     }
 
-    fn size_of(replica: &GSet<String>) -> usize {
+    fn size_of(replica: &Self::Replica) -> usize {
         replica.elements().iter().map(String::len).sum()
     }
 
