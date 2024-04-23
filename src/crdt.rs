@@ -87,6 +87,17 @@ where
     }
 }
 
+impl<T> PartialEq for GSet<T>
+where
+    T: Eq + Hash,
+{
+    fn eq(&self, other: &Self) -> bool {
+        self.base == other.base
+    }
+}
+
+impl<T> Eq for GSet<T> where T: Eq + Hash {}
+
 #[cfg(test)]
 mod tests {
     use super::*;
