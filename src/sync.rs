@@ -14,7 +14,7 @@ pub struct Metrics {
 
 pub trait Algorithm<R> {
     fn sync(&mut self) -> Metrics;
-    fn sizeof(replica: &R) -> usize;
+    fn size_of(replica: &R) -> usize;
 }
 
 pub struct Baseline {
@@ -37,7 +37,7 @@ impl Algorithm<GSet<String>> for Baseline {
 
         // 1. Ship the full local state and send them to the remote peer
         let local_state = self.local.clone();
-        metrics.bytes_exchanged += Baseline::sizeof(&local_state);
+        metrics.bytes_exchanged += Baseline::size_of(&local_state);
         metrics.round_trips += 1;
 
         // 2. The remote peer computes the optimal delta from its current state
@@ -46,7 +46,7 @@ impl Algorithm<GSet<String>> for Baseline {
 
         self.remote.join(vec![remote_unseen]);
 
-        metrics.bytes_exchanged += Baseline::sizeof(&local_unseen);
+        metrics.bytes_exchanged += Baseline::size_of(&local_unseen);
         metrics.round_trips += 1;
 
         // 3. Merge the minimum delta from the remote peer
@@ -62,7 +62,7 @@ impl Algorithm<GSet<String>> for Baseline {
         metrics
     }
 
-    fn sizeof(replica: &GSet<String>) -> usize {
+    fn size_of(replica: &GSet<String>) -> usize {
         replica.elements().iter().map(String::len).sum()
     }
 }
@@ -163,7 +163,7 @@ impl Algorithm<GSet<String>> for BucketDispatcher {
 
         metrics.bytes_exchanged += non_matching_buckets
             .iter()
-            .map(BucketDispatcher::sizeof)
+            .map(BucketDispatcher::size_of)
             .sum::<usize>();
         metrics.round_trips += 1;
 
@@ -193,7 +193,7 @@ impl Algorithm<GSet<String>> for BucketDispatcher {
 
         metrics.bytes_exchanged += remote_unseen
             .iter()
-            .map(BucketDispatcher::sizeof)
+            .map(BucketDispatcher::size_of)
             .sum::<usize>();
         metrics.round_trips += 1;
 
@@ -208,7 +208,7 @@ impl Algorithm<GSet<String>> for BucketDispatcher {
         metrics
     }
 
-    fn sizeof(replica: &GSet<String>) -> usize {
+    fn size_of(replica: &GSet<String>) -> usize {
         replica.elements().iter().map(String::len).sum()
     }
 }
