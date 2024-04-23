@@ -69,7 +69,7 @@ impl Algorithm<GSet<String>> for Baseline {
     }
 
     fn is_synced(&self) -> bool {
-        self.local.elements() == self.remote.elements()
+        self.local == self.remote
     }
 }
 
@@ -210,6 +210,6 @@ impl<const B: usize> Algorithm<GSet<String>> for BucketDispatcher<B> {
     }
 
     fn is_synced(&self) -> bool {
-        self.local.elements() == self.remote.elements()
+        self.local == self.remote
     }
 }
