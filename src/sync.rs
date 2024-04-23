@@ -7,27 +7,25 @@ pub struct Metrics {
     false_matches: usize,
 }
 
-pub type Replica = GSet<String>;
-
-pub trait Algorithm {
+pub trait Algorithm<R> {
     fn sync(&mut self) -> Metrics;
-    fn sizeof(replica: &Replica) -> usize {
-        replica.elements().iter().map(String::len).sum()
-    }
+    fn sizeof(replica: &R) -> usize;
 }
 
 pub struct Baseline {
-    local: Replica,
-    remote: Replica,
+    local: GSet<String>,
+    remote: GSet<String>,
 }
 
 impl Baseline {
-    pub fn new(local: Replica, remote: Replica) -> Self {
+    #[inline]
+    #[must_use]
+    pub fn new(local: GSet<String>, remote: GSet<String>) -> Self {
         Self { local, remote }
     }
 }
 
-impl Algorithm for Baseline {
+impl Algorithm<GSet<String>> for Baseline {
     fn sync(&mut self) -> Metrics {
         let mut metrics = Metrics::default();
 
@@ -56,5 +54,9 @@ impl Algorithm for Baseline {
             .count();
 
         metrics
+    }
+
+    fn sizeof(replica: &GSet<String>) -> usize {
+        replica.elements().iter().map(String::len).sum()
     }
 }
