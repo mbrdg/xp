@@ -26,7 +26,6 @@ pub struct Baseline {
 }
 
 impl Baseline {
-    #[allow(dead_code)]
     #[inline]
     #[must_use]
     pub fn new(local: GSet<String>, remote: GSet<String>) -> Self {
@@ -83,7 +82,6 @@ pub struct BucketDispatcher<const B: usize> {
 }
 
 impl<const B: usize> BucketDispatcher<B> {
-    #[allow(dead_code)]
     #[inline]
     #[must_use]
     pub fn new(local: GSet<String>, remote: GSet<String>) -> Self {

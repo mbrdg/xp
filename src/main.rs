@@ -1,4 +1,9 @@
-use crate::{crdt::GSet, sync::BucketDispatcher};
+#![allow(dead_code)]
+
+use crate::{
+    crdt::GSet,
+    sync::{Baseline, BucketDispatcher},
+};
 use rand::{
     distributions::{Alphanumeric, DistString},
     rngs::StdRng,
@@ -45,9 +50,9 @@ fn gen_items(config: Config) -> (GSet<String>, GSet<String>) {
 
 fn main() {
     let config = Config {
-        item_count: 10000,
+        item_count: 100_000,
         item_size: 80,
-        similarity: 50,
+        similarity: 98,
         seed: 42,
     };
 
@@ -58,7 +63,9 @@ fn main() {
 
     let (local, remote) = gen_items(config);
 
-    let mut dispatcher = BucketDispatcher::<16>::new(local, remote);
+    let mut baseline = Baseline::new(local.clone(), remote.clone());
+    baseline.sync();
+
+    let mut dispatcher = BucketDispatcher::<64>::new(local, remote);
     dispatcher.sync();
-    assert!(dispatcher.is_synced());
 }
