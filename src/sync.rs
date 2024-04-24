@@ -127,7 +127,7 @@ impl<const B: usize> Algorithm for BucketDispatcher<B> {
             s.hash_one(
                 bucket
                     .iter()
-                    .fold(String::new(), |h, k| h + k.1.to_string().as_str()),
+                    .fold(String::new(), |h, k| h + &k.1.to_string()),
             )
         });
 
@@ -168,7 +168,7 @@ impl<const B: usize> Algorithm for BucketDispatcher<B> {
                 let remote_hash = s.hash_one(
                     bucket
                         .iter()
-                        .fold(String::new(), |h, k| h + k.1.to_string().as_str()),
+                        .fold(String::new(), |h, k| h + &k.1.to_string()),
                 );
 
                 if remote_hash == local_hash {
