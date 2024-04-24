@@ -40,12 +40,12 @@ impl Algorithm for Baseline {
     fn sync(&mut self) -> Metrics {
         let mut metrics = Metrics::default();
 
-        // 1. Ship the full local state and send them to the remote peer
+        // 1. Ship the full local state and send them to the remote peer.
         let local_state = self.local.clone();
         metrics.bytes_exchanged += Baseline::size_of(&local_state);
         metrics.round_trips += 1;
 
-        // 2. The remote peer computes the optimal delta from its current state
+        // 2. The remote peer computes the optimal delta from its current state.
         let remote_unseen = local_state.difference(&self.remote);
         let local_unseen = self.remote.difference(&local_state);
 
@@ -54,10 +54,10 @@ impl Algorithm for Baseline {
         metrics.bytes_exchanged += Baseline::size_of(&local_unseen);
         metrics.round_trips += 1;
 
-        // 3. Merge the minimum delta from the remote peer
+        // 3. Merge the minimum delta from the remote peer.
         self.local.join(vec![local_unseen]);
 
-        // 4. sanity check, i.e., false matches must be 0
+        // 4. Sanity check, i.e., false matches must be 0.
         metrics.false_matches = self
             .local
             .elements()
@@ -100,10 +100,15 @@ impl<const B: usize> Algorithm for BucketDispatcher<B> {
 
         const BUCKET: Vec<(GSet<String>, u64)> = Vec::new();
 
+        // 1. Split the local state into decompositions and assign them to a particular bucket.
+        //    The policy is implementation defined, but here, each decomposition is assigned to a
+        //    bucket based on the remainder from its hash value w.r.t. to the number of buckets.
         let mut local_buckets = [BUCKET; B];
-        self.local.split().into_iter().for_each(|decomposition| {
+
+        // 1.1. Compute the hash and assign to the corresponding bucket (locally).
+        self.local.split().into_iter().for_each(|delta| {
             let hash = s.hash_one(
-                decomposition
+                delta
                     .elements()
                     .iter()
                     .next()
@@ -111,13 +116,15 @@ impl<const B: usize> Algorithm for BucketDispatcher<B> {
             );
 
             let i = usize::try_from(hash).unwrap() % local_buckets.len();
-            local_buckets[i].push((decomposition, hash));
+            local_buckets[i].push((delta, hash));
         });
 
+        // 1.2 Sort the bucket's elements based on its items hash values, i.e, Merkle trick.
         local_buckets
             .iter_mut()
             .for_each(|bucket| bucket.sort_unstable_by_key(|k| k.1));
 
+        // 1.3. Compute the bucket hash value (locally).
         let local_hashes = local_buckets.iter().map(|bucket| {
             s.hash_one(
                 bucket
@@ -126,13 +133,19 @@ impl<const B: usize> Algorithm for BucketDispatcher<B> {
             )
         });
 
+        // 1.4 Send the bucket hashes to the remote replica.
         metrics.bytes_exchanged += size_of::<u64>() * B;
         metrics.round_trips += 1;
 
+        // 2. Split the remote state into decompositions and assign them to a particular bucket.
+        //    Again, the policy is implementation defined, but it must be deterministic across
+        //    different replicas.
         let mut remote_buckets = [BUCKET; B];
-        self.remote.split().into_iter().for_each(|decomposition| {
+
+        // 2.1 Compute the hash and assign to the corresponding bucket (remotely).
+        self.remote.split().into_iter().for_each(|delta| {
             let hash = s.hash_one(
-                decomposition
+                delta
                     .elements()
                     .iter()
                     .next()
@@ -140,14 +153,17 @@ impl<const B: usize> Algorithm for BucketDispatcher<B> {
             );
 
             let i = usize::try_from(hash).unwrap() % remote_buckets.len();
-            remote_buckets[i].push((decomposition, hash));
+            remote_buckets[i].push((delta, hash));
         });
 
+        // 2.2 Sort the bucket's elements based on its items hash values, i.e, Merkle trick.
         remote_buckets
             .iter_mut()
             .for_each(|bucket| bucket.sort_unstable_by_key(|k| k.1));
 
-        let non_matching_buckets: Vec<GSet<String>> = remote_buckets
+        // 2.3. Aggregate the state from the non matching buckets. Or, if the hashes match, ship
+        //   back an empty payload to the local replica.
+        let non_matching_buckets: Vec<_> = remote_buckets
             .iter_mut()
             .zip(local_hashes)
             .map(|(bucket, local_hash)| {
@@ -157,39 +173,47 @@ impl<const B: usize> Algorithm for BucketDispatcher<B> {
                         .fold(String::new(), |h, k| h + k.1.to_string().as_str()),
                 );
 
-                let mut state = GSet::new();
-                if remote_hash != local_hash {
-                    state.join(bucket.drain(..).map(|k| k.0).collect());
+                if remote_hash == local_hash {
+                    return None;
                 }
 
-                state
+                let mut state = GSet::new();
+                state.join(bucket.drain(..).map(|k| k.0).collect());
+
+                Some(state)
             })
             .collect();
 
+        // 2.4. Send the aggregated bucket state back to the local replica.
         metrics.bytes_exchanged += non_matching_buckets
             .iter()
+            .flatten()
             .map(BucketDispatcher::<B>::size_of)
             .sum::<usize>();
         metrics.round_trips += 1;
 
+        // 3. Compute the state that has been not yet seen by the local replica, and send back to
+        //    remote peer the state that he has not seen yet. Only the difference, i.e., the
+        //    optimal delta, computed from the join-decompositions, is sent back.
         let (local_unseen, remote_unseen) = local_buckets
             .into_iter()
             .map(|bucket| {
-                let mut gset = GSet::new();
-                gset.join(bucket.into_iter().map(|k| k.0).collect());
+                let mut state = GSet::new();
+                state.join(bucket.into_iter().map(|k| k.0).collect());
 
-                gset
+                state
             })
             .zip(non_matching_buckets)
-            .filter(|buckets| !buckets.1.is_empty())
-            .fold(
-                (Vec::with_capacity(B), Vec::with_capacity(B)),
-                |mut unseen, (local_bucket, non_matching_bucket)| {
-                    unseen.0.push(non_matching_bucket.difference(&local_bucket));
-                    unseen.1.push(local_bucket.difference(&non_matching_bucket));
-                    unseen
-                },
-            );
+            .flat_map(|buckets| match buckets.1 {
+                Some(state) => Some((buckets.0, state)),
+                None => None,
+            })
+            .fold((Vec::new(), Vec::new()), |mut unseen, buckets| {
+                unseen.0.push(buckets.1.difference(&buckets.0));
+                unseen.1.push(buckets.0.difference(&buckets.1));
+
+                unseen
+            });
 
         self.local.join(local_unseen);
 
@@ -201,6 +225,7 @@ impl<const B: usize> Algorithm for BucketDispatcher<B> {
 
         self.remote.join(remote_unseen);
 
+        // 4. Sanity check, i.e., false matches must be 0.
         metrics.false_matches = self
             .local
             .elements()
