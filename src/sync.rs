@@ -1,14 +1,11 @@
-use std::{
-    hash::{BuildHasher, RandomState},
-    mem::size_of,
-};
+use std::hash::{BuildHasher, RandomState};
 
 use crate::crdt::{Decomposable, GSet};
 
 #[derive(Debug, Default)]
 pub struct Metrics {
     bytes_exchanged: usize,
-    round_trips: u8,
+    network_hops: u8,
     false_matches: usize,
 }
 
@@ -42,7 +39,7 @@ impl Algorithm for Baseline {
         // 1. Ship the full local state and send them to the remote peer.
         let local_state = self.local.clone();
         metrics.bytes_exchanged += Baseline::size_of(&local_state);
-        metrics.round_trips += 1;
+        metrics.network_hops += 1;
 
         // 2. The remote peer computes the optimal delta from its current state.
         let remote_unseen = local_state.difference(&self.remote);
@@ -51,7 +48,7 @@ impl Algorithm for Baseline {
         self.remote.join(vec![remote_unseen]);
 
         metrics.bytes_exchanged += Baseline::size_of(&local_unseen);
-        metrics.round_trips += 1;
+        metrics.network_hops += 1;
 
         // 3. Merge the minimum delta from the remote peer.
         self.local.join(vec![local_unseen]);
@@ -63,7 +60,7 @@ impl Algorithm for Baseline {
             .symmetric_difference(self.remote.elements())
             .count();
 
-        println!("=> Baseline\n\t=> {:?}", metrics);
+        println!("Baseline: {:?}", metrics);
         metrics
     }
 
@@ -132,8 +129,8 @@ impl<const B: usize> Algorithm for BucketDispatcher<B> {
         });
 
         // 1.4 Send the bucket hashes to the remote replica.
-        metrics.bytes_exchanged += size_of::<u64>() * B;
-        metrics.round_trips += 1;
+        metrics.bytes_exchanged += std::mem::size_of::<u64>() * B;
+        metrics.network_hops += 1;
 
         // 2. Split the remote state into decompositions and assign them to a particular bucket.
         //    Again, the policy is implementation defined, but it must be deterministic across
@@ -188,7 +185,7 @@ impl<const B: usize> Algorithm for BucketDispatcher<B> {
             .flatten()
             .map(BucketDispatcher::<B>::size_of)
             .sum::<usize>();
-        metrics.round_trips += 1;
+        metrics.network_hops += 1;
 
         // 3. Compute the state that has been not yet seen by the local replica, and send back to
         //    remote peer the state that he has not seen yet. Only the difference, i.e., the
@@ -206,7 +203,7 @@ impl<const B: usize> Algorithm for BucketDispatcher<B> {
                 Some(state) => Some((buckets.0, state)),
                 None => None,
             })
-            .fold((Vec::new(), Vec::new()), |mut unseen, buckets| {
+            .fold((vec![], vec![]), |mut unseen, buckets| {
                 unseen.0.push(buckets.1.difference(&buckets.0));
                 unseen.1.push(buckets.0.difference(&buckets.1));
 
@@ -219,7 +216,7 @@ impl<const B: usize> Algorithm for BucketDispatcher<B> {
             .iter()
             .map(BucketDispatcher::<B>::size_of)
             .sum::<usize>();
-        metrics.round_trips += 1;
+        metrics.network_hops += 1;
 
         self.remote.join(remote_unseen);
 
@@ -230,7 +227,7 @@ impl<const B: usize> Algorithm for BucketDispatcher<B> {
             .symmetric_difference(self.remote.elements())
             .count();
 
-        println!("=> BucketDispatcher w/ {} buckets\n\t=> {:?}", B, metrics);
+        println!("BucketDispatcher w/ {} buckets: {:?}", B, metrics);
         metrics
     }
 

@@ -23,7 +23,7 @@ pub struct Config {
 }
 
 fn gen_items(config: Config) -> (GSet<String>, GSet<String>) {
-    println!("=> Generating items w/ {:?}", config);
+    println!("Generating items: {:?}", config);
     let sim_items = config.item_count * usize::from(config.similarity) / 100;
     let diff_items = config.item_count - sim_items;
 
@@ -50,7 +50,7 @@ fn gen_items(config: Config) -> (GSet<String>, GSet<String>) {
 
 fn main() {
     let config = Config {
-        item_count: 100_000,
+        item_count: 10_000,
         item_size: 80,
         similarity: 98,
         seed: 42,
