@@ -11,6 +11,7 @@ use rand::{
 };
 use sync::Algorithm;
 
+mod bloom;
 mod crdt;
 mod sync;
 
