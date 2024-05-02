@@ -1,8 +1,10 @@
 #![allow(dead_code)]
 
+use std::f64;
+
 use crate::{
     crdt::GSet,
-    sync::{Baseline, BucketDispatcher},
+    sync::{Baseline, PSync},
 };
 use rand::{
     distributions::{Alphanumeric, DistString},
@@ -19,14 +21,16 @@ mod sync;
 pub struct Config {
     item_count: usize,
     item_size: usize,
-    similarity: u8,
+    similarity: f64,
     seed: u64,
 }
 
 fn gen_items(config: Config) -> (GSet<String>, GSet<String>) {
     println!("Generating items: {:?}", config);
-    let sim_items = config.item_count * usize::from(config.similarity) / 100;
+    let sim_items = (config.item_count as f64 * config.similarity) as usize;
     let diff_items = config.item_count - sim_items;
+
+    dbg!(sim_items, diff_items);
 
     let mut gsets = (GSet::new(), GSet::new());
 
@@ -53,13 +57,13 @@ fn main() {
     let config = Config {
         item_count: 10_000,
         item_size: 80,
-        similarity: 98,
+        similarity: 0.90,
         seed: 42,
     };
 
     assert!(
-        (0..=100).contains(&config.similarity),
-        "similariry must be a percentage, i.e, a value between 0 and 100",
+        (0.0..=1.0).contains(&config.similarity),
+        "similarity should be in the interval between 0.0 and 1.0 inclusive"
     );
 
     let (local, remote) = gen_items(config);
@@ -67,6 +71,9 @@ fn main() {
     let mut baseline = Baseline::new(local.clone(), remote.clone());
     baseline.sync();
 
-    let mut dispatcher = BucketDispatcher::<64>::new(local, remote);
-    dispatcher.sync();
+    let mut probabilistic = PSync::new(local, remote);
+    probabilistic.sync();
+
+    // let mut dispatcher = BucketDispatcher::<64>::new(local, remote);
+    // dispatcher.sync();
 }
