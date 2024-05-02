@@ -4,12 +4,12 @@ use std::{
     marker::PhantomData,
 };
 
-use bitvec::{bitvec, vec::BitVec};
+use bitvec::{bitvec, slice::BitSlice, vec::BitVec};
 
 pub struct BloomFilter<T: ?Sized> {
     base: BitVec,
     hashers: [RandomState; 2],
-    k: u64,
+    hashes: u64,
     marker: PhantomData<T>,
 }
 
@@ -19,20 +19,26 @@ where
 {
     #[inline]
     #[must_use]
-    pub fn with_capacity_and_rate(capacity: usize, rate: f64) -> Self {
+    pub fn new() -> Self {
+        BloomFilter::with_capacity_and_fpr(10_000, 0.01)
+    }
+
+    #[inline]
+    #[must_use]
+    pub fn with_capacity_and_fpr(capacity: usize, fpr: f64) -> Self {
         assert!(
-            0.0 <= rate && rate <= 1.0,
-            "rate should be in the interval [0.0, 1.0)"
+            (0.0..=1.0).contains(&fpr),
+            "false positive rate should be in the interval between 0.0 and 1.0 inclusive"
         );
 
         // Compute the optimal bitarray size `m` and the optimal number of hash functions `k`
-        let m = (-1.0f64 * capacity as f64 * rate.ln() / (LN_2 * LN_2)).ceil() as usize;
-        let k = (-1.0f64 * rate.ln() / LN_2).ceil() as u64;
+        let m = (-1.0f64 * capacity as f64 * fpr.ln() / (LN_2 * LN_2)).ceil() as usize;
+        let k = (-1.0f64 * fpr.ln() / LN_2).ceil() as u64;
 
         Self {
             base: bitvec![0; m],
             hashers: [RandomState::new(), RandomState::new()],
-            k,
+            hashes: k,
             marker: PhantomData,
         }
     }
@@ -44,7 +50,7 @@ where
             self.hashers[1].hash_one(value),
         );
 
-        (0..self.k).all(|i| {
+        (0..self.hashes).all(|i| {
             let bit =
                 usize::try_from(h.0.wrapping_add(i.wrapping_mul(h.1))).unwrap() % self.base.len();
             self.base[bit]
@@ -58,11 +64,16 @@ where
             self.hashers[1].hash_one(value),
         );
 
-        (0..self.k).for_each(|i| {
+        (0..self.hashes).for_each(|i| {
             let bit =
                 usize::try_from(h.0.wrapping_add(i.wrapping_mul(h.1))).unwrap() % self.base.len();
             self.base.set(bit, true);
         })
+    }
+
+    #[inline]
+    pub fn as_bitslice(&self) -> &BitSlice {
+        &self.base
     }
 }
 
@@ -71,8 +82,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_membership() {
-        let mut bloom = BloomFilter::with_capacity_and_rate(100, 0.01);
+    fn test_membership_and_no_false_positives() {
+        let mut bloom = BloomFilter::with_capacity_and_fpr(100, 0.01);
 
         assert!(!bloom.contains("1"));
         assert!(!bloom.contains("2"));
