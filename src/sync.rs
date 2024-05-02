@@ -1,6 +1,9 @@
 use std::hash::{BuildHasher, RandomState};
 
-use crate::crdt::{Decomposable, GSet};
+use crate::{
+    bloom::BloomFilter,
+    crdt::{Decomposable, GSet},
+};
 
 #[derive(Debug, Default)]
 pub struct Metrics {
@@ -228,6 +231,109 @@ impl<const B: usize> Algorithm for BucketDispatcher<B> {
             .count();
 
         println!("BucketDispatcher w/ {} buckets: {:?}", B, metrics);
+        metrics
+    }
+
+    fn size_of(replica: &Self::Replica) -> usize {
+        replica.elements().iter().map(String::len).sum()
+    }
+
+    fn is_synced(&self) -> bool {
+        self.local == self.remote
+    }
+}
+
+pub struct PSync {
+    local: GSet<String>,
+    remote: GSet<String>,
+}
+
+impl PSync {
+    #[inline]
+    #[must_use]
+    pub fn new(local: GSet<String>, remote: GSet<String>) -> Self {
+        Self { local, remote }
+    }
+}
+
+impl Algorithm for PSync {
+    type Replica = GSet<String>;
+
+    fn sync(&mut self) -> Metrics {
+        let mut metrics = Metrics::default();
+        const FPR: f64 = 0.0001; // 0.01 %
+
+        // 1. Split the local state and insert each decomposition into a AMQ filter
+        let local_split = self.local.split();
+        let mut local_filter = BloomFilter::with_capacity_and_fpr(local_split.len(), FPR);
+
+        local_split.iter().for_each(|delta| {
+            let item = delta
+                .elements()
+                .iter()
+                .next()
+                .expect("a decomposition should have a single element");
+            local_filter.insert(item);
+        });
+
+        // 2. Send the bloom filter to the remote replica
+        metrics.bytes_exchanged +=
+            (local_filter.as_bitslice().len() / 8 + 1) + 2 * std::mem::size_of::<RandomState>();
+        metrics.network_hops += 1;
+
+        // 3. Compute the items that are known by the remote replica
+        let (common, local_unkown): (Vec<_>, Vec<_>) =
+            self.remote.split().into_iter().partition(|delta| {
+                let item = delta
+                    .elements()
+                    .iter()
+                    .next()
+                    .expect("a decomposition should have a single item");
+                local_filter.contains(item)
+            });
+
+        let mut remote_filter = BloomFilter::with_capacity_and_fpr(common.len(), FPR);
+        common.into_iter().for_each(|delta| {
+            let item = delta
+                .elements()
+                .iter()
+                .next()
+                .expect("a decomposition should have a single item");
+            remote_filter.insert(item);
+        });
+
+        // 4. Ship back the unkown state at the local replica and a AMQ filter with common state
+        metrics.bytes_exchanged += (remote_filter.as_bitslice().len() / 8 + 1)
+            + 2 * std::mem::size_of::<RandomState>()
+            + local_unkown.iter().map(PSync::size_of).sum::<usize>();
+        metrics.network_hops += 1;
+
+        // 5. Detect the unkown state at the remote replica
+        let (_, remote_unknown): (Vec<_>, Vec<_>) = local_split.into_iter().partition(|delta| {
+            let item = delta
+                .elements()
+                .iter()
+                .next()
+                .expect("a decomposition should have a single item");
+            remote_filter.contains(item)
+        });
+
+        self.local.join(local_unkown);
+
+        // 6. Ship back the delta known locally but not remotely
+        metrics.bytes_exchanged += remote_unknown.iter().map(PSync::size_of).sum::<usize>();
+        metrics.network_hops += 1;
+
+        self.remote.join(remote_unknown);
+
+        // 7. Check how many differences exist, this algorithm does not guarantee full state sync
+        metrics.false_matches += self
+            .local
+            .elements()
+            .symmetric_difference(self.remote.elements())
+            .count();
+
+        println!("PSync: {:?}", metrics);
         metrics
     }
 
