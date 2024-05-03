@@ -4,6 +4,7 @@ pub trait Tracker {
     fn register(&mut self, event: Self::Event);
     fn finish(&mut self, false_matches: usize);
     fn events(&self) -> &Vec<Self::Event>;
+    fn false_matches(&self) -> Option<usize>;
 }
 
 #[derive(Debug)]
@@ -44,5 +45,9 @@ impl Tracker for DefaultTracker {
 
     fn events(&self) -> &Vec<Self::Event> {
         &self.events
+    }
+
+    fn false_matches(&self) -> Option<usize> {
+        self.false_matches
     }
 }

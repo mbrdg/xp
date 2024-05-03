@@ -57,13 +57,15 @@ impl Algorithm for Baseline {
         self.local.join(vec![local_unseen]);
 
         // 4. Sanity check.
-        // NOTE: This algorithm guarantees that replicas sync given that no operations occur.
         tracker.finish(
             self.local
                 .elements()
                 .symmetric_difference(self.remote.elements())
                 .count(),
         );
+
+        // NOTE: This algorithm guarantees that replicas sync given that no operations occur.
+        debug_assert_eq!(tracker.false_matches().unwrap(), 0);
 
         tracker
     }
@@ -344,13 +346,15 @@ impl<const B: usize> Algorithm for BucketDispatcher<B> {
         self.remote.join(remote_unseen);
 
         // 5. Sanity check.
-        // NOTE: This algorithm guarantees that replicas sync given that no operations occur.
         tracker.finish(
             self.local
                 .elements()
                 .symmetric_difference(self.remote.elements())
                 .count(),
         );
+
+        // NOTE: This algorithm guarantees that replicas sync given that no operations occur.
+        debug_assert_eq!(tracker.false_matches().unwrap(), 0);
 
         tracker
     }
