@@ -90,6 +90,12 @@ impl Probabilistic {
     pub fn new(local: GSet<String>, remote: GSet<String>) -> Self {
         Self { local, remote }
     }
+
+    #[inline]
+    fn size_of_filter(filter: &BloomFilter<String>) -> usize {
+        let len = filter.as_bitslice().len();
+        len / 8 + min(1, len % 8) + 2 * std::mem::size_of::<RandomState>()
+    }
 }
 
 impl Algorithm for Probabilistic {
@@ -114,11 +120,9 @@ impl Algorithm for Probabilistic {
         });
 
         // 1.2. Ship the Bloom filter to the remote replica.
-        let local_filter_len = local_filter.as_bitslice().len();
-        tracker.register(NetworkHop::LocalToRemote(
-            (local_filter_len / 8 + min(1, local_filter_len % 8))
-                + 2 * std::mem::size_of::<RandomState>(),
-        ));
+        tracker.register(NetworkHop::LocalToRemote(Probabilistic::size_of_filter(
+            &local_filter,
+        )));
 
         // 2.1. At the remote replica, split the state into join decompositions. Then split the
         //   decompositions into common, i.e., present in both replicas, and unknown, i.e., present
@@ -145,10 +149,8 @@ impl Algorithm for Probabilistic {
         });
 
         // 2.3. Send back to the remote replica the unknown decompositions and the Bloom Filter.
-        let remote_filter_len = remote_filter.as_bitslice().len();
         tracker.register(NetworkHop::RemoteToLocal(
-            (remote_filter_len / 8 + min(1, remote_filter_len % 8))
-                + 2 * std::mem::size_of::<RandomState>()
+            Probabilistic::size_of_filter(&remote_filter)
                 + local_unkown
                     .iter()
                     .map(Probabilistic::size_of)
