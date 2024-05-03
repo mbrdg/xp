@@ -59,7 +59,7 @@ fn main() {
     let (item_count, item_size, seed) = (100_000, 80, random());
     println!("{:?}", (item_count, item_size, seed));
 
-    println!("Algorithm\tSim\tDiffs\tBytes\tHops");
+    println!("Algorithm\tSim\tDiffs\tHops\tBytes (ratio)");
 
     for similarity in (0..=100).rev().step_by(10) {
         let (local, remote) = populate_replicas(item_count, item_size, similarity, seed);
@@ -74,7 +74,10 @@ fn main() {
                 .sum::<usize>(),
             baseline.events().len(),
         );
-        println!("Baseline\t{similarity}\t{diffs}\t{bytes}\t{hops}");
+        println!(
+            "Baseline\t{similarity}\t{diffs}\t{hops}\t{bytes} ({:.8}%)",
+            bytes as f32 / (item_count * item_size) as f32 * 100.0
+        );
 
         let probabilistic = Probabilistic::new(local.clone(), remote.clone()).sync();
         let (diffs, bytes, hops) = (
@@ -86,7 +89,10 @@ fn main() {
                 .sum::<usize>(),
             probabilistic.events().len(),
         );
-        println!("Probabilistic\t{similarity}\t{diffs}\t{bytes}\t{hops}");
+        println!(
+            "Probabilistic\t{similarity}\t{diffs}\t{hops}\t{bytes} ({:.8}%)",
+            bytes as f32 / (item_count * item_size) as f32 * 100.0
+        );
 
         let dispatcher_16 = BucketDispatcher::<16>::new(local.clone(), remote.clone()).sync();
         let (diffs, bytes, hops) = (
@@ -98,7 +104,10 @@ fn main() {
                 .sum::<usize>(),
             dispatcher_16.events().len(),
         );
-        println!("Buckets<16>\t{similarity}\t{diffs}\t{bytes}\t{hops}");
+        println!(
+            "Buckets<16>\t{similarity}\t{diffs}\t{hops}\t{bytes} ({:.8}%)",
+            bytes as f32 / (item_count * item_size) as f32 * 100.0
+        );
 
         let dispatcher_64 = BucketDispatcher::<64>::new(local, remote).sync();
         let (diffs, bytes, hops) = (
@@ -110,6 +119,9 @@ fn main() {
                 .sum::<usize>(),
             dispatcher_64.events().len(),
         );
-        println!("Buckets<64>\t{similarity}\t{diffs}\t{bytes}\t{hops}");
+        println!(
+            "Buckets<64>\t{similarity}\t{diffs}\t{hops}\t{bytes} ({:.8}%)",
+            bytes as f32 / (item_count * item_size) as f32 * 100.0
+        );
     }
 }
