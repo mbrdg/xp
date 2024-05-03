@@ -1,4 +1,5 @@
 use std::{
+    cmp::max,
     f64::consts::LN_2,
     hash::{BuildHasher, Hash, RandomState},
     marker::PhantomData,
@@ -27,8 +28,8 @@ where
     #[must_use]
     pub fn with_capacity_and_fpr(capacity: usize, fpr: f64) -> Self {
         assert!(
-            (0.0..=1.0).contains(&fpr),
-            "false positive rate should be in the interval between 0.0 and 1.0 inclusive"
+            (0.0..1.0).contains(&fpr) && fpr != 0.0,
+            "false positive rate should be in the interval (0.0 and 1.0)"
         );
 
         // Compute the optimal bitarray size `m` and the optimal number of hash functions `k`
@@ -36,7 +37,7 @@ where
         let k = (-1.0f64 * fpr.ln() / LN_2).ceil() as u64;
 
         Self {
-            base: bitvec![0; m],
+            base: bitvec![0; max(m, 1)],
             hashers: [RandomState::new(), RandomState::new()],
             hashes: k,
             marker: PhantomData,
