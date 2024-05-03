@@ -4,7 +4,7 @@ pub trait Tracker {
     fn register(&mut self, event: Self::Event);
     fn finish(&mut self, false_matches: usize);
     fn events(&self) -> &Vec<Self::Event>;
-    fn false_matches(&self) -> Option<usize>;
+    fn diffs(&self) -> Option<usize>;
 }
 
 #[derive(Debug)]
@@ -13,10 +13,20 @@ pub enum NetworkHop {
     RemoteToLocal(usize),
 }
 
+impl NetworkHop {
+    #[inline]
+    pub fn bytes(&self) -> usize {
+        match self {
+            Self::LocalToRemote(b) => *b,
+            Self::RemoteToLocal(b) => *b,
+        }
+    }
+}
+
 #[derive(Debug, Default)]
 pub struct DefaultTracker {
     events: Vec<NetworkHop>,
-    false_matches: Option<usize>,
+    diffs: Option<usize>,
 }
 
 impl DefaultTracker {
@@ -25,7 +35,7 @@ impl DefaultTracker {
     pub fn new() -> Self {
         Self {
             events: vec![],
-            false_matches: None,
+            diffs: None,
         }
     }
 }
@@ -34,20 +44,20 @@ impl Tracker for DefaultTracker {
     type Event = NetworkHop;
 
     fn register(&mut self, event: Self::Event) {
-        if let None = self.false_matches {
+        if let None = self.diffs {
             self.events.push(event)
         }
     }
 
-    fn finish(&mut self, false_matches: usize) {
-        self.false_matches = Some(false_matches)
+    fn finish(&mut self, diffs: usize) {
+        self.diffs = Some(diffs)
     }
 
     fn events(&self) -> &Vec<Self::Event> {
         &self.events
     }
 
-    fn false_matches(&self) -> Option<usize> {
-        self.false_matches
+    fn diffs(&self) -> Option<usize> {
+        self.diffs
     }
 }

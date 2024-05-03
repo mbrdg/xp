@@ -65,7 +65,7 @@ impl Algorithm for Baseline {
         );
 
         // NOTE: This algorithm guarantees that replicas sync given that no operations occur.
-        debug_assert_eq!(tracker.false_matches().unwrap(), 0);
+        debug_assert_eq!(tracker.diffs().unwrap(), 0);
 
         tracker
     }
@@ -354,7 +354,7 @@ impl<const B: usize> Algorithm for BucketDispatcher<B> {
         );
 
         // NOTE: This algorithm guarantees that replicas sync given that no operations occur.
-        debug_assert_eq!(tracker.false_matches().unwrap(), 0);
+        debug_assert_eq!(tracker.diffs().unwrap(), 0);
 
         tracker
     }
