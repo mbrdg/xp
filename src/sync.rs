@@ -148,7 +148,11 @@ impl Algorithm for Probabilistic {
         let remote_filter_len = remote_filter.as_bitslice().len();
         tracker.register(NetworkHop::RemoteToLocal(
             (remote_filter_len / 8 + min(1, remote_filter_len % 8))
-                + 2 * std::mem::size_of::<RandomState>(),
+                + 2 * std::mem::size_of::<RandomState>()
+                + local_unkown
+                    .iter()
+                    .map(Probabilistic::size_of)
+                    .sum::<usize>(),
         ));
 
         // 3.1. At the local replica, split the state into join decompositions. Then split the
