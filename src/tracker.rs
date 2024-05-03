@@ -1,12 +1,7 @@
-#[derive(Debug)]
-pub enum TrackerError {
-    FinishedTracker,
-}
-
 pub trait Tracker {
     type Event;
 
-    fn register(&mut self, event: Self::Event) -> Result<(), TrackerError>;
+    fn register(&mut self, event: Self::Event);
     fn finish(&mut self, false_matches: usize);
     fn events(&self) -> &Vec<Self::Event>;
 }
@@ -37,13 +32,9 @@ impl DefaultTracker {
 impl Tracker for DefaultTracker {
     type Event = NetworkHop;
 
-    fn register(&mut self, event: Self::Event) -> Result<(), TrackerError> {
-        match self.false_matches {
-            Some(_) => Err(TrackerError::FinishedTracker),
-            None => {
-                self.events.push(event);
-                Ok(())
-            }
+    fn register(&mut self, event: Self::Event) {
+        if let None = self.false_matches {
+            self.events.push(event)
         }
     }
 
