@@ -38,23 +38,26 @@ impl Algorithm for Baseline {
     fn sync(&mut self) -> Self::Tracker {
         let mut tracker = Self::Tracker::new();
 
-        // 1. Ship the full local state and send them to the remote peer.
+        // 1. Ship the full local state and send it the remote replica.
         let local_state = self.local.clone();
 
         tracker.register(NetworkHop::LocalToRemote(Baseline::size_of(&local_state)));
 
-        // 2. The remote peer computes the optimal delta from its current state.
+        // 2.1. Compute the optimal delta based on the remote replica state.
         let remote_unseen = local_state.difference(&self.remote);
         let local_unseen = self.remote.difference(&local_state);
 
+        // 2.2. Join the decompositions that are unknown to the remote replica.
         self.remote.join(vec![remote_unseen]);
 
+        // 2.3. Send back to the local replica the decompositions unknown to the local replica.
         tracker.register(NetworkHop::RemoteToLocal(Baseline::size_of(&local_unseen)));
 
-        // 3. Merge the minimum delta from the remote peer.
+        // 3. Merge the minimum delta received from the remote replica.
         self.local.join(vec![local_unseen]);
 
-        // 4. Sanity check, i.e., false matches must be 0.
+        // 4. Sanity check.
+        // NOTE: This algorithm guarantees that replicas sync given that no operations occur.
         tracker.finish(
             self.local
                 .elements()
@@ -95,7 +98,7 @@ impl Algorithm for Probabilistic {
         let mut tracker = Self::Tracker::new();
         const FPR: f64 = 0.0001; // 0.01 %
 
-        // 1. Split the local state and insert each decomposition into a AMQ filter
+        // 1.1. Split the local state and insert each decomposition into a Bloom Filter.
         let local_split = self.local.split();
         let mut local_filter = BloomFilter::with_capacity_and_fpr(local_split.len(), FPR);
 
@@ -108,14 +111,16 @@ impl Algorithm for Probabilistic {
             local_filter.insert(item);
         });
 
-        // 2. Send the bloom filter to the remote replica
+        // 1.2. Ship the Bloom filter to the remote replica.
         let local_filter_len = local_filter.as_bitslice().len();
         tracker.register(NetworkHop::LocalToRemote(
             (local_filter_len / 8 + min(1, local_filter_len % 8))
                 + 2 * std::mem::size_of::<RandomState>(),
         ));
 
-        // 3. Compute the items that are known by the remote replica
+        // 2.1. At the remote replica, split the state into join decompositions. Then split the
+        //   decompositions into common, i.e., present in both replicas, and unknown, i.e., present
+        //   remotely but not locally.
         let (common, local_unkown): (Vec<_>, Vec<_>) =
             self.remote.split().into_iter().partition(|delta| {
                 let item = delta
@@ -126,6 +131,7 @@ impl Algorithm for Probabilistic {
                 local_filter.contains(item)
             });
 
+        // 2.2. From the common partions build a Bloom Filter.
         let mut remote_filter = BloomFilter::with_capacity_and_fpr(common.len(), FPR);
         common.into_iter().for_each(|delta| {
             let item = delta
@@ -136,14 +142,16 @@ impl Algorithm for Probabilistic {
             remote_filter.insert(item);
         });
 
-        // 4. Ship back the unkown state at the local replica and a AMQ filter with common state
+        // 2.3. Send back to the remote replica the unknown decompositions and the Bloom Filter.
         let remote_filter_len = remote_filter.as_bitslice().len();
         tracker.register(NetworkHop::RemoteToLocal(
             (remote_filter_len / 8 + min(1, remote_filter_len % 8))
                 + 2 * std::mem::size_of::<RandomState>(),
         ));
 
-        // 5. Detect the unkown state at the remote replica
+        // 3.1. At the local replica, split the state into join decompositions. Then split the
+        //   decompositions into common, i.e., present in both replicas, and unknown, i.e., present
+        //   locally but not remotely.
         let (_, remote_unknown): (Vec<_>, Vec<_>) = local_split.into_iter().partition(|delta| {
             let item = delta
                 .elements()
@@ -153,16 +161,19 @@ impl Algorithm for Probabilistic {
             remote_filter.contains(item)
         });
 
+        // 3.2. Join the incoming local unknown decompositons.
         self.local.join(local_unkown);
 
-        // 6. Ship back the delta known locally but not remotely
+        // 3.3. Send to the remote replica the unkown decompositions.
         tracker.register(NetworkHop::LocalToRemote(
             remote_unknown.iter().map(Probabilistic::size_of).sum(),
         ));
 
+        // 4. Join the incoming remote unkown decompositions.
         self.remote.join(remote_unknown);
 
-        // 7. Check how many differences exist, this algorithm does not guarantee full state sync
+        // 5. Sanity check.
+        // NOTE: This algorithm does not guarantee full state sync between replicas.
         tracker.finish(
             self.local
                 .elements()
@@ -202,17 +213,16 @@ impl<const B: usize> Algorithm for BucketDispatcher<B> {
     fn sync(&mut self) -> Self::Tracker {
         let mut tracker = Self::Tracker::new();
 
-        let s = RandomState::new();
         const BUCKET: Vec<(GSet<String>, u64)> = Vec::new();
 
-        // 1. Split the local state into decompositions and assign them to a particular bucket.
-        //    The policy is implementation defined, but here, each decomposition is assigned to a
-        //    bucket based on the remainder from its hash value w.r.t. to the number of buckets.
+        let hasher = RandomState::new();
         let mut local_buckets = [BUCKET; B];
 
-        // 1.1. Compute the hash and assign to the corresponding bucket (locally).
+        // 1.1. Split the local state and assign each to a bucket. The assignment policy is
+        //    implementation defined; here it is used the modulo of the hash value w.r.t. the
+        //    number of buckets.
         self.local.split().into_iter().for_each(|delta| {
-            let hash = s.hash_one(
+            let hash = hasher.hash_one(
                 delta
                     .elements()
                     .iter()
@@ -224,14 +234,14 @@ impl<const B: usize> Algorithm for BucketDispatcher<B> {
             local_buckets[i].push((delta, hash));
         });
 
-        // 1.2 Sort the bucket's elements based on its items hash values, i.e, Merkle trick.
+        // 1.2. Sort the bucket's elements based on its items hash values, i.e, Merkle trick.
         local_buckets
             .iter_mut()
             .for_each(|bucket| bucket.sort_unstable_by_key(|k| k.1));
 
-        // 1.3. Compute the bucket hash value (locally).
+        // 1.3. At the local replica, compute the hash of each bucket.
         let local_hashes = local_buckets.iter().map(|bucket| {
-            s.hash_one(
+            hasher.hash_one(
                 bucket
                     .iter()
                     .fold(String::new(), |h, k| h + &k.1.to_string()),
@@ -241,14 +251,14 @@ impl<const B: usize> Algorithm for BucketDispatcher<B> {
         // 1.4 Send the bucket hashes to the remote replica.
         tracker.register(NetworkHop::LocalToRemote(std::mem::size_of::<u64>() * B));
 
-        // 2. Split the remote state into decompositions and assign them to a particular bucket.
-        //    Again, the policy is implementation defined, but it must be deterministic across
-        //    different replicas.
         let mut remote_buckets = [BUCKET; B];
 
-        // 2.1 Compute the hash and assign to the corresponding bucket (remotely).
+        // 2.1. Split the remote state and assign to a bucket. The assignment policy is
+        //    implementation defined; here it is used the modulo of the hash value w.r.t. the
+        //    number of buckets.
+        //    NOTE: The policy must be same across replicas.
         self.remote.split().into_iter().for_each(|delta| {
-            let hash = s.hash_one(
+            let hash = hasher.hash_one(
                 delta
                     .elements()
                     .iter()
@@ -271,7 +281,7 @@ impl<const B: usize> Algorithm for BucketDispatcher<B> {
             .iter_mut()
             .zip(local_hashes)
             .map(|(bucket, local_hash)| {
-                let remote_hash = s.hash_one(
+                let remote_hash = hasher.hash_one(
                     bucket
                         .iter()
                         .fold(String::new(), |h, k| h + &k.1.to_string()),
@@ -297,9 +307,9 @@ impl<const B: usize> Algorithm for BucketDispatcher<B> {
                 .sum(),
         ));
 
-        // 3. Compute the state that has been not yet seen by the local replica, and send back to
+        // 3.1. Compute the state that has been not yet seen by the local replica, and send back to
         //    remote peer the state that he has not seen yet. Only the difference, i.e., the
-        //    optimal delta, computed from the join-decompositions, is sent back.
+        //    optimal delta, computed from decompositions, is sent back.
         let (local_unseen, remote_unseen) = local_buckets
             .into_iter()
             .map(|bucket| {
@@ -320,6 +330,7 @@ impl<const B: usize> Algorithm for BucketDispatcher<B> {
                 unseen
             });
 
+        // 3.2. Join the buckets received from the remote replica that contain some state.
         self.local.join(local_unseen);
 
         tracker.register(NetworkHop::LocalToRemote(
@@ -329,9 +340,11 @@ impl<const B: usize> Algorithm for BucketDispatcher<B> {
                 .sum(),
         ));
 
+        // 4.1. Join the optimal deltas received from the local replica.
         self.remote.join(remote_unseen);
 
-        // 4. Sanity check, i.e., false matches must be 0.
+        // 5. Sanity check.
+        // NOTE: This algorithm guarantees that replicas sync given that no operations occur.
         tracker.finish(
             self.local
                 .elements()
