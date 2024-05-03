@@ -49,8 +49,10 @@ impl Tracker for DefaultTracker {
         }
     }
 
-    fn finish(&mut self, diffs: usize) {
-        self.differences = Some(diffs)
+    fn finish(&mut self, differences: usize) {
+        if let None = self.differences {
+            self.differences = Some(differences)
+        }
     }
 
     fn events(&self) -> &Vec<Self::Event> {
