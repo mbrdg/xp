@@ -9,7 +9,7 @@ use crate::{
     tracker::{DefaultTracker, NetworkHop, Tracker},
 };
 
-pub trait Algorithm {
+pub trait Protocol {
     type Replica;
     type Tracker;
 
@@ -31,7 +31,7 @@ impl Baseline {
     }
 }
 
-impl Algorithm for Baseline {
+impl Protocol for Baseline {
     type Replica = GSet<String>;
     type Tracker = DefaultTracker;
 
@@ -98,7 +98,7 @@ impl Probabilistic {
     }
 }
 
-impl Algorithm for Probabilistic {
+impl Protocol for Probabilistic {
     type Replica = GSet<String>;
     type Tracker = DefaultTracker;
 
@@ -214,7 +214,7 @@ impl<const B: usize> BucketDispatcher<B> {
     }
 }
 
-impl<const B: usize> Algorithm for BucketDispatcher<B> {
+impl<const B: usize> Protocol for BucketDispatcher<B> {
     type Replica = GSet<String>;
     type Tracker = DefaultTracker;
 

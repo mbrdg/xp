@@ -2,7 +2,7 @@
 
 use crate::{
     crdt::GSet,
-    sync::{Algorithm, Baseline, BucketDispatcher, Probabilistic},
+    sync::{Baseline, BucketDispatcher, Probabilistic, Protocol},
     tracker::{NetworkHop, Tracker},
 };
 use rand::{
