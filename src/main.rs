@@ -59,14 +59,14 @@ fn main() {
     let (item_count, item_size, seed) = (100_000, 80, random());
     println!("{:?}", (item_count, item_size, seed));
 
-    println!("Algorithm\tSim\tDiffs\tHops\tBytes (ratio)");
+    println!("Algorithm\tSimilar\tDiffs\tHops\tBytes (ratio)");
 
-    for similarity in (0..=100).rev().step_by(10) {
+    for similarity in (0..=100).rev().step_by(1) {
         let (local, remote) = populate_replicas(item_count, item_size, similarity, seed);
 
         let baseline = Baseline::new(local.clone(), remote.clone()).sync();
         let (diffs, bytes, hops) = (
-            baseline.diffs().unwrap(),
+            baseline.differences().unwrap(),
             baseline
                 .events()
                 .iter()
@@ -75,13 +75,13 @@ fn main() {
             baseline.events().len(),
         );
         println!(
-            "Baseline\t{similarity}\t{diffs}\t{hops}\t{bytes} ({:.8}%)",
+            "Baseline\t{similarity}\t{diffs}\t{hops}\t{bytes} ({:.5}%)",
             bytes as f32 / (item_count * item_size) as f32 * 100.0
         );
 
         let probabilistic = Probabilistic::new(local.clone(), remote.clone()).sync();
         let (diffs, bytes, hops) = (
-            probabilistic.diffs().unwrap(),
+            probabilistic.differences().unwrap(),
             probabilistic
                 .events()
                 .iter()
@@ -90,13 +90,13 @@ fn main() {
             probabilistic.events().len(),
         );
         println!(
-            "Probabilistic\t{similarity}\t{diffs}\t{hops}\t{bytes} ({:.8}%)",
+            "Probabilistic\t{similarity}\t{diffs}\t{hops}\t{bytes} ({:.5}%)",
             bytes as f32 / (item_count * item_size) as f32 * 100.0
         );
 
         let dispatcher_16 = BucketDispatcher::<16>::new(local.clone(), remote.clone()).sync();
         let (diffs, bytes, hops) = (
-            dispatcher_16.diffs().unwrap(),
+            dispatcher_16.differences().unwrap(),
             dispatcher_16
                 .events()
                 .iter()
@@ -105,13 +105,13 @@ fn main() {
             dispatcher_16.events().len(),
         );
         println!(
-            "Buckets<16>\t{similarity}\t{diffs}\t{hops}\t{bytes} ({:.8}%)",
+            "Buckets<16>\t{similarity}\t{diffs}\t{hops}\t{bytes} ({:.5}%)",
             bytes as f32 / (item_count * item_size) as f32 * 100.0
         );
 
         let dispatcher_64 = BucketDispatcher::<64>::new(local, remote).sync();
         let (diffs, bytes, hops) = (
-            dispatcher_64.diffs().unwrap(),
+            dispatcher_64.differences().unwrap(),
             dispatcher_64
                 .events()
                 .iter()
@@ -120,7 +120,7 @@ fn main() {
             dispatcher_64.events().len(),
         );
         println!(
-            "Buckets<64>\t{similarity}\t{diffs}\t{hops}\t{bytes} ({:.8}%)",
+            "Buckets<64>\t{similarity}\t{diffs}\t{hops}\t{bytes} ({:.5}%)",
             bytes as f32 / (item_count * item_size) as f32 * 100.0
         );
     }
