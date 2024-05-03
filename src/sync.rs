@@ -65,7 +65,7 @@ impl Algorithm for Baseline {
         );
 
         // NOTE: This algorithm guarantees that replicas sync given that no operations occur.
-        debug_assert_eq!(tracker.diffs().unwrap(), 0);
+        assert!(self.is_synced());
 
         tracker
     }
@@ -98,7 +98,7 @@ impl Algorithm for Probabilistic {
 
     fn sync(&mut self) -> Self::Tracker {
         let mut tracker = Self::Tracker::new();
-        const FPR: f64 = 0.0001; // 0.01 %
+        const FPR: f64 = 0.001; // 0.1 %
 
         // 1.1. Split the local state and insert each decomposition into a Bloom Filter.
         let local_split = self.local.split();
@@ -354,7 +354,7 @@ impl<const B: usize> Algorithm for BucketDispatcher<B> {
         );
 
         // NOTE: This algorithm guarantees that replicas sync given that no operations occur.
-        debug_assert_eq!(tracker.diffs().unwrap(), 0);
+        assert!(self.is_synced());
 
         tracker
     }

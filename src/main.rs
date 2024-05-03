@@ -7,6 +7,7 @@ use crate::{
 };
 use rand::{
     distributions::{Alphanumeric, DistString},
+    random,
     rngs::StdRng,
     SeedableRng,
 };
@@ -42,16 +43,25 @@ fn populate_replicas(
         gsets.1.insert(item);
     }
 
+    assert_eq!(
+        gsets
+            .0
+            .elements()
+            .symmetric_difference(&gsets.1.elements())
+            .count(),
+        2 * diff_items
+    );
+
     gsets
 }
 
 fn main() {
-    let (item_count, item_size, seed) = (100_000, 80, 42);
+    let (item_count, item_size, seed) = (100_000, 80, random());
     println!("{:?}", (item_count, item_size, seed));
 
     println!("Algorithm\tSim\tDiffs\tBytes\tHops");
 
-    for similarity in (10..=100).rev().step_by(5) {
+    for similarity in (0..=100).rev().step_by(10) {
         let (local, remote) = populate_replicas(item_count, item_size, similarity, seed);
 
         let baseline = Baseline::new(local.clone(), remote.clone()).sync();
