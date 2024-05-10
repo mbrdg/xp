@@ -20,13 +20,7 @@ where
 {
     #[inline]
     #[must_use]
-    pub fn new() -> Self {
-        BloomFilter::with_capacity_and_fpr(10_000, 0.01)
-    }
-
-    #[inline]
-    #[must_use]
-    pub fn with_capacity_and_fpr(capacity: usize, fpr: f64) -> Self {
+    pub fn new(capacity: usize, fpr: f64) -> Self {
         assert!(
             (0.0..1.0).contains(&fpr) && fpr != 0.0,
             "false positive rate should be in the interval (0.0 and 1.0)"
@@ -84,7 +78,7 @@ mod tests {
 
     #[test]
     fn test_membership_and_no_false_positives() {
-        let mut bloom = BloomFilter::with_capacity_and_fpr(100, 0.01);
+        let mut bloom = BloomFilter::new(100, 0.01);
 
         assert!(!bloom.contains("1"));
         assert!(!bloom.contains("2"));

@@ -108,7 +108,7 @@ impl Protocol for Probabilistic {
 
         // 1.1. Split the local state and insert each decomposition into a Bloom Filter.
         let local_split = self.local.split();
-        let mut local_filter = BloomFilter::with_capacity_and_fpr(local_split.len(), FPR);
+        let mut local_filter = BloomFilter::new(local_split.len(), FPR);
 
         local_split.iter().for_each(|delta| {
             let item = delta
@@ -138,7 +138,7 @@ impl Protocol for Probabilistic {
             });
 
         // 2.2. From the common partions build a Bloom Filter.
-        let mut remote_filter = BloomFilter::with_capacity_and_fpr(common.len(), FPR);
+        let mut remote_filter = BloomFilter::new(common.len(), FPR);
         common.into_iter().for_each(|delta| {
             let item = delta
                 .elements()
