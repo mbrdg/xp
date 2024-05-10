@@ -1,9 +1,11 @@
+use std::time::Duration;
+
 pub trait Tracker {
     type Event;
 
     fn register(&mut self, event: Self::Event);
     fn finish(&mut self, differences: usize);
-    fn events(&self) -> &Vec<Self::Event>;
+    fn events(&self) -> &Vec<(Self::Event, Duration)>;
     fn differences(&self) -> Option<usize>;
 }
 
@@ -17,25 +19,29 @@ impl NetworkHop {
     #[inline]
     pub fn bytes(&self) -> usize {
         match self {
-            Self::LocalToRemote(b) => *b,
-            Self::RemoteToLocal(b) => *b,
+            Self::LocalToRemote(bytes) => *bytes,
+            Self::RemoteToLocal(bytes) => *bytes,
         }
     }
 }
 
 #[derive(Debug, Default)]
 pub struct DefaultTracker {
-    events: Vec<NetworkHop>,
+    events: Vec<(NetworkHop, Duration)>,
     differences: Option<usize>,
+    baudrate: usize,
 }
 
 impl DefaultTracker {
     #[inline]
     #[must_use]
-    pub fn new() -> Self {
+    pub fn new(bytes_per_sec: usize) -> Self {
+        assert_ne!(bytes_per_sec, 0);
+
         Self {
             events: vec![],
             differences: None,
+            baudrate: bytes_per_sec,
         }
     }
 }
@@ -45,7 +51,8 @@ impl Tracker for DefaultTracker {
 
     fn register(&mut self, event: Self::Event) {
         if let None = self.differences {
-            self.events.push(event)
+            let duration = Duration::from_secs_f64(event.bytes() as f64 / self.baudrate as f64);
+            self.events.push((event, duration))
         }
     }
 
@@ -55,7 +62,7 @@ impl Tracker for DefaultTracker {
         }
     }
 
-    fn events(&self) -> &Vec<Self::Event> {
+    fn events(&self) -> &Vec<(NetworkHop, Duration)> {
         &self.events
     }
 

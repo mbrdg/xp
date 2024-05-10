@@ -36,7 +36,7 @@ impl Protocol for Baseline {
     type Tracker = DefaultTracker;
 
     fn sync(&mut self) -> Self::Tracker {
-        let mut tracker = Self::Tracker::new();
+        let mut tracker = DefaultTracker::new(16_000);
 
         // 1. Ship the full local state and send it the remote replica.
         let local_state = self.local.clone();
@@ -103,7 +103,7 @@ impl Protocol for Probabilistic {
     type Tracker = DefaultTracker;
 
     fn sync(&mut self) -> Self::Tracker {
-        let mut tracker = Self::Tracker::new();
+        let mut tracker = DefaultTracker::new(16_000);
         const FPR: f64 = 0.001; // 0.1 %
 
         // 1.1. Split the local state and insert each decomposition into a Bloom Filter.
@@ -219,7 +219,7 @@ impl<const B: usize> Protocol for BucketDispatcher<B> {
     type Tracker = DefaultTracker;
 
     fn sync(&mut self) -> Self::Tracker {
-        let mut tracker = Self::Tracker::new();
+        let mut tracker = DefaultTracker::new(16_000);
 
         const BUCKET: Vec<(GSet<String>, u64)> = Vec::new();
 
