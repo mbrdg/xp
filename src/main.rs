@@ -1,9 +1,11 @@
 #![allow(dead_code)]
 
+use std::time::{Duration, Instant};
+
 use crate::{
     crdt::GSet,
-    sync::{Baseline, BucketDispatcher, Probabilistic, Protocol},
-    tracker::{NetworkHop, Tracker},
+    sync::{Baseline, Buckets, Protocol},
+    tracker::{EventTracker, NetworkHop},
 };
 use rand::{
     distributions::{Alphanumeric, DistString},
@@ -11,6 +13,7 @@ use rand::{
     rngs::StdRng,
     SeedableRng,
 };
+use tracker::DefaultTracker;
 
 mod bloom;
 mod crdt;
@@ -25,103 +28,76 @@ fn populate_replicas(
 ) -> (GSet<String>, GSet<String>) {
     let similar_items = (count as f64 * (similarity as f64 / 100.0)) as usize;
     let diff_items = count - similar_items;
+    eprintln!("similarity: {similarity} ({similar_items}, {diff_items})");
 
-    let mut gsets = (GSet::new(), GSet::new());
+    let (mut l, mut r) = (GSet::new(), GSet::new());
     let mut rng = StdRng::seed_from_u64(seed);
 
     for _ in 0..similar_items {
         let item = Alphanumeric.sample_string(&mut rng, size);
-        gsets.0.insert(item.clone());
-        gsets.1.insert(item);
+        l.insert(item.clone());
+        r.insert(item);
     }
 
     for _ in 0..diff_items {
         let item = Alphanumeric.sample_string(&mut rng, size);
-        gsets.0.insert(item);
+        l.insert(item);
 
         let item = Alphanumeric.sample_string(&mut rng, size);
-        gsets.1.insert(item);
+        r.insert(item);
     }
 
     assert_eq!(
-        gsets
-            .0
-            .elements()
-            .symmetric_difference(&gsets.1.elements())
-            .count(),
+        l.elements().symmetric_difference(r.elements()).count(),
         2 * diff_items
     );
 
-    gsets
+    (l, r)
+}
+
+fn print_stats(protocol: &str, similarity: usize, tracker: DefaultTracker) {
+    let (hops, duration, bytes) = (
+        tracker.events().len(),
+        tracker
+            .events()
+            .iter()
+            .map(NetworkHop::duration)
+            .sum::<Duration>(),
+        tracker
+            .events()
+            .iter()
+            .map(NetworkHop::bytes)
+            .sum::<usize>(),
+    );
+
+    println!("{protocol} {similarity} {hops} {duration:?} {bytes}")
 }
 
 fn main() {
+    let start = Instant::now();
+
     let (item_count, item_size, seed) = (100_000, 80, random());
-    println!("{:?}", (item_count, item_size, seed));
+    eprintln!("config: {item_count} {item_size} {seed}");
 
-    println!("Algorithm\tSimilar\tDiffs\tHops\tBytes (ratio)");
-
-    for similarity in (0..=100).rev().step_by(1) {
+    for similarity in (0..=100).rev().step_by(5) {
         let (local, remote) = populate_replicas(item_count, item_size, similarity, seed);
 
         let baseline = Baseline::new(local.clone(), remote.clone()).sync();
-        let (diffs, bytes, hops) = (
-            baseline.differences().unwrap(),
-            baseline
-                .events()
-                .iter()
-                .map(NetworkHop::bytes)
-                .sum::<usize>(),
-            baseline.events().len(),
-        );
-        println!(
-            "Baseline\t{similarity}\t{diffs}\t{hops}\t{bytes} ({:.5}%)",
-            bytes as f32 / (item_count * item_size) as f32 * 100.0
-        );
+        print_stats("baseline", similarity, baseline);
 
-        let probabilistic = Probabilistic::new(local.clone(), remote.clone()).sync();
-        let (diffs, bytes, hops) = (
-            probabilistic.differences().unwrap(),
-            probabilistic
-                .events()
-                .iter()
-                .map(NetworkHop::bytes)
-                .sum::<usize>(),
-            probabilistic.events().len(),
-        );
-        println!(
-            "Probabilistic\t{similarity}\t{diffs}\t{hops}\t{bytes} ({:.5}%)",
-            bytes as f32 / (item_count * item_size) as f32 * 100.0
-        );
+        // NOTE: The number of buckets must increase accordingly to the set's size.
+        let buckets_1024 = Buckets::<1024>::new(local.clone(), remote.clone()).sync();
+        print_stats("buckets_1024", similarity, buckets_1024);
 
-        let dispatcher_16 = BucketDispatcher::<16>::new(local.clone(), remote.clone()).sync();
-        let (diffs, bytes, hops) = (
-            dispatcher_16.differences().unwrap(),
-            dispatcher_16
-                .events()
-                .iter()
-                .map(NetworkHop::bytes)
-                .sum::<usize>(),
-            dispatcher_16.events().len(),
-        );
-        println!(
-            "Buckets<16>\t{similarity}\t{diffs}\t{hops}\t{bytes} ({:.5}%)",
-            bytes as f32 / (item_count * item_size) as f32 * 100.0
-        );
+        let buckets_2048 = Buckets::<2048>::new(local.clone(), remote.clone()).sync();
+        print_stats("buckets_2048", similarity, buckets_2048);
 
-        let dispatcher_64 = BucketDispatcher::<64>::new(local, remote).sync();
-        let (diffs, bytes, hops) = (
-            dispatcher_64.differences().unwrap(),
-            dispatcher_64
-                .events()
-                .iter()
-                .map(NetworkHop::bytes)
-                .sum::<usize>(),
-            dispatcher_64.events().len(),
-        );
-        println!(
-            "Buckets<64>\t{similarity}\t{diffs}\t{hops}\t{bytes} ({:.5}%)",
-            bytes as f32 / (item_count * item_size) as f32 * 100.0
-        );
+        let buckets_4096 = Buckets::<4096>::new(local.clone(), remote.clone()).sync();
+        print_stats("buckets_4096", similarity, buckets_4096);
+
+        let buckets_8192 = Buckets::<8192>::new(local.clone(), remote.clone()).sync();
+        print_stats("buckets_8192", similarity, buckets_8192);
     }
+
+    eprintln!("Took {:.3?}", start.elapsed());
 }
