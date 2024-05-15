@@ -86,12 +86,12 @@ impl Protocol for Baseline {
     }
 }
 
-pub struct Probabilistic {
+pub struct BloomBased {
     local: GSet<String>,
     remote: GSet<String>,
 }
 
-impl Probabilistic {
+impl BloomBased {
     #[inline]
     #[must_use]
     pub fn new(local: GSet<String>, remote: GSet<String>) -> Self {
@@ -107,7 +107,7 @@ impl Probabilistic {
     }
 }
 
-impl Protocol for Probabilistic {
+impl Protocol for BloomBased {
     type Replica = GSet<String>;
     type Tracker = DefaultTracker;
 
@@ -133,7 +133,7 @@ impl Protocol for Probabilistic {
         // 1.2. Ship the Bloom filter to the remote replica.
         tracker.register(NetworkHop::as_local_to_remote(
             &tracker,
-            Probabilistic::size_of_filter(&local_filter),
+            BloomBased::size_of_filter(&local_filter),
         ));
 
         // 2.1. At the remote replica, split the state into join decompositions. Then split the
@@ -163,11 +163,8 @@ impl Protocol for Probabilistic {
         // 2.3. Send back to the remote replica the unknown decompositions and the Bloom Filter.
         tracker.register(NetworkHop::as_remote_to_local(
             &tracker,
-            Probabilistic::size_of_filter(&remote_filter)
-                + local_unkown
-                    .iter()
-                    .map(Probabilistic::size_of)
-                    .sum::<usize>(),
+            BloomBased::size_of_filter(&remote_filter)
+                + local_unkown.iter().map(BloomBased::size_of).sum::<usize>(),
         ));
 
         // 3.1. At the local replica, split the state into join decompositions. Then split the
@@ -188,7 +185,7 @@ impl Protocol for Probabilistic {
         // 3.3. Send to the remote replica the unkown decompositions.
         tracker.register(NetworkHop::as_local_to_remote(
             &tracker,
-            remote_unknown.iter().map(Probabilistic::size_of).sum(),
+            remote_unknown.iter().map(BloomBased::size_of).sum(),
         ));
 
         // 4. Join the incoming remote unkown decompositions.
