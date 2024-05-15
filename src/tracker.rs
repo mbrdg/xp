@@ -26,27 +26,23 @@ pub enum NetworkHop {
 impl NetworkHop {
     #[inline]
     #[must_use]
-    pub fn as_local_to_remote(tracker: &impl NetworkTracker, bytes: usize) -> Self {
-        assert!(tracker.upload() > 0, "bandwidth should be greater than 0");
+    pub fn as_local_to_remote(upload: usize, bytes: usize) -> Self {
+        assert!(upload > 0, "bandwidth should be greater than 0");
 
         Self::LocalToRemote {
             bytes,
-            duration: Duration::from_millis(
-                u64::try_from(bytes / (tracker.upload() * 1000)).unwrap(),
-            ),
+            duration: Duration::from_millis(u64::try_from(bytes / (upload * 1000)).unwrap()),
         }
     }
 
     #[inline]
     #[must_use]
-    pub fn as_remote_to_local(tracker: &impl NetworkTracker, bytes: usize) -> Self {
-        assert!(tracker.download() > 0, "bandwidth should be greater than 0");
+    pub fn as_remote_to_local(download: usize, bytes: usize) -> Self {
+        assert!(download > 0, "bandwidth should be greater than 0");
 
         Self::RemoteToLocal {
             bytes,
-            duration: Duration::from_millis(
-                u64::try_from(bytes / (tracker.download() * 1000)).unwrap(),
-            ),
+            duration: Duration::from_millis(u64::try_from(bytes / (download * 1000)).unwrap()),
         }
     }
 

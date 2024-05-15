@@ -6,7 +6,7 @@ use std::{
 use crate::{
     bloom::BloomFilter,
     crdt::{Decomposable, GSet},
-    tracker::{DefaultTracker, EventTracker, NetworkHop, SyncTracker},
+    tracker::{DefaultTracker, EventTracker, NetworkHop, NetworkTracker, SyncTracker},
 };
 
 pub trait Protocol {
@@ -43,7 +43,7 @@ impl Protocol for Baseline {
         let local_state = self.local.clone();
 
         tracker.register(NetworkHop::as_local_to_remote(
-            &tracker,
+            tracker.upload(),
             Baseline::size_of(&local_state),
         ));
 
@@ -56,7 +56,7 @@ impl Protocol for Baseline {
 
         // 2.3. Send back to the local replica the decompositions unknown to the local replica.
         tracker.register(NetworkHop::as_remote_to_local(
-            &tracker,
+            tracker.download(),
             Baseline::size_of(&local_unseen),
         ));
 
@@ -132,7 +132,7 @@ impl Protocol for BloomBased {
 
         // 1.2. Ship the Bloom filter to the remote replica.
         tracker.register(NetworkHop::as_local_to_remote(
-            &tracker,
+            tracker.upload(),
             BloomBased::size_of_filter(&local_filter),
         ));
 
@@ -162,7 +162,7 @@ impl Protocol for BloomBased {
 
         // 2.3. Send back to the remote replica the unknown decompositions and the Bloom Filter.
         tracker.register(NetworkHop::as_remote_to_local(
-            &tracker,
+            tracker.download(),
             BloomBased::size_of_filter(&remote_filter)
                 + local_unkown.iter().map(BloomBased::size_of).sum::<usize>(),
         ));
@@ -184,7 +184,7 @@ impl Protocol for BloomBased {
 
         // 3.3. Send to the remote replica the unkown decompositions.
         tracker.register(NetworkHop::as_local_to_remote(
-            &tracker,
+            tracker.upload(),
             remote_unknown.iter().map(BloomBased::size_of).sum(),
         ));
 
@@ -270,7 +270,7 @@ impl<const B: usize> Protocol for BucketDispatcher<B> {
 
         // 1.4 Send the bucket hashes to the remote replica.
         tracker.register(NetworkHop::as_local_to_remote(
-            &tracker,
+            tracker.upload(),
             std::mem::size_of::<u64>() * B,
         ));
 
@@ -323,7 +323,7 @@ impl<const B: usize> Protocol for BucketDispatcher<B> {
 
         // 2.4. Send the aggregated bucket state back to the local replica.
         tracker.register(NetworkHop::as_remote_to_local(
-            &tracker,
+            tracker.download(),
             non_matching_buckets
                 .iter()
                 .flatten()
@@ -358,7 +358,7 @@ impl<const B: usize> Protocol for BucketDispatcher<B> {
         self.local.join(local_unseen);
 
         tracker.register(NetworkHop::as_local_to_remote(
-            &tracker,
+            tracker.upload(),
             remote_unseen
                 .iter()
                 .map(BucketDispatcher::<B>::size_of)
