@@ -212,12 +212,12 @@ impl Protocol for BloomBased {
     }
 }
 
-pub struct BucketDispatcher<const B: usize> {
+pub struct Buckets<const B: usize> {
     local: GSet<String>,
     remote: GSet<String>,
 }
 
-impl<const B: usize> BucketDispatcher<B> {
+impl<const B: usize> Buckets<B> {
     #[inline]
     #[must_use]
     pub fn new(local: GSet<String>, remote: GSet<String>) -> Self {
@@ -225,7 +225,7 @@ impl<const B: usize> BucketDispatcher<B> {
     }
 }
 
-impl<const B: usize> Protocol for BucketDispatcher<B> {
+impl<const B: usize> Protocol for Buckets<B> {
     type Replica = GSet<String>;
     type Tracker = DefaultTracker;
 
@@ -327,7 +327,7 @@ impl<const B: usize> Protocol for BucketDispatcher<B> {
             non_matching_buckets
                 .iter()
                 .flatten()
-                .map(BucketDispatcher::<B>::size_of)
+                .map(Buckets::<B>::size_of)
                 .sum(),
         ));
 
@@ -359,10 +359,7 @@ impl<const B: usize> Protocol for BucketDispatcher<B> {
 
         tracker.register(NetworkHop::as_local_to_remote(
             tracker.upload(),
-            remote_unseen
-                .iter()
-                .map(BucketDispatcher::<B>::size_of)
-                .sum(),
+            remote_unseen.iter().map(Buckets::<B>::size_of).sum(),
         ));
 
         // 4.1. Join the optimal deltas received from the local replica.
