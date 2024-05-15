@@ -1,72 +1,127 @@
 use std::time::Duration;
 
-pub trait Tracker {
+pub trait EventTracker {
     type Event;
 
     fn register(&mut self, event: Self::Event);
-    fn finish(&mut self, differences: usize);
-    fn events(&self) -> &Vec<(Self::Event, Duration)>;
-    fn differences(&self) -> Option<usize>;
+    fn events(&self) -> &Vec<Self::Event>;
+}
+
+pub trait SyncTracker {
+    fn freeze(&mut self, diffs: usize);
+    fn diffs(&self) -> Result<usize, &str>;
+}
+
+pub trait NetworkTracker {
+    fn download(&self) -> usize;
+    fn upload(&self) -> usize;
 }
 
 #[derive(Debug)]
 pub enum NetworkHop {
-    LocalToRemote(usize),
-    RemoteToLocal(usize),
+    LocalToRemote { bytes: usize, duration: Duration },
+    RemoteToLocal { bytes: usize, duration: Duration },
 }
 
 impl NetworkHop {
     #[inline]
+    #[must_use]
+    pub fn as_local_to_remote(tracker: &impl NetworkTracker, bytes: usize) -> Self {
+        assert!(tracker.upload() > 0, "bandwidth should be greater than 0");
+
+        Self::LocalToRemote {
+            bytes,
+            duration: Duration::from_millis(
+                u64::try_from(bytes / (tracker.upload() * 1000)).unwrap(),
+            ),
+        }
+    }
+
+    #[inline]
+    #[must_use]
+    pub fn as_remote_to_local(tracker: &impl NetworkTracker, bytes: usize) -> Self {
+        assert!(tracker.download() > 0, "bandwidth should be greater than 0");
+
+        Self::RemoteToLocal {
+            bytes,
+            duration: Duration::from_millis(
+                u64::try_from(bytes / (tracker.download() * 1000)).unwrap(),
+            ),
+        }
+    }
+
     pub fn bytes(&self) -> usize {
         match self {
-            Self::LocalToRemote(bytes) => *bytes,
-            Self::RemoteToLocal(bytes) => *bytes,
+            Self::LocalToRemote { bytes, duration: _ } => *bytes,
+            Self::RemoteToLocal { bytes, duration: _ } => *bytes,
+        }
+    }
+
+    pub fn duration(&self) -> Duration {
+        match self {
+            Self::LocalToRemote { bytes: _, duration } => *duration,
+            Self::RemoteToLocal { bytes: _, duration } => *duration,
         }
     }
 }
 
 #[derive(Debug, Default)]
 pub struct DefaultTracker {
-    events: Vec<(NetworkHop, Duration)>,
-    differences: Option<usize>,
-    baudrate: usize,
+    events: Vec<NetworkHop>,
+    diffs: Option<usize>,
+    download: usize,
+    upload: usize,
 }
 
 impl DefaultTracker {
     #[inline]
     #[must_use]
-    pub fn new(bytes_per_sec: usize) -> Self {
-        assert_ne!(bytes_per_sec, 0);
+    pub fn new(download: usize, upload: usize) -> Self {
+        assert!(download > 0, "download should be greater than 0");
+        assert!(upload > 0, "upload should be greater than 0");
 
         Self {
             events: vec![],
-            differences: None,
-            baudrate: bytes_per_sec,
+            diffs: None,
+            download,
+            upload,
         }
     }
 }
 
-impl Tracker for DefaultTracker {
+impl EventTracker for DefaultTracker {
     type Event = NetworkHop;
 
-    fn register(&mut self, event: Self::Event) {
-        if let None = self.differences {
-            let duration = Duration::from_secs_f64(event.bytes() as f64 / self.baudrate as f64);
-            self.events.push((event, duration))
+    fn register(&mut self, event: NetworkHop) {
+        if self.diffs.is_none() {
+            self.events.push(event)
         }
     }
 
-    fn finish(&mut self, differences: usize) {
-        if let None = self.differences {
-            self.differences = Some(differences)
-        }
-    }
-
-    fn events(&self) -> &Vec<(NetworkHop, Duration)> {
+    fn events(&self) -> &Vec<NetworkHop> {
         &self.events
     }
+}
 
-    fn differences(&self) -> Option<usize> {
-        self.differences
+impl SyncTracker for DefaultTracker {
+    fn freeze(&mut self, diffs: usize) {
+        if self.diffs.is_none() {
+            self.diffs = Some(diffs)
+        }
+    }
+
+    fn diffs(&self) -> Result<usize, &str> {
+        self.diffs
+            .ok_or("`freeze()` should be called before getting the diffs")
+    }
+}
+
+impl NetworkTracker for DefaultTracker {
+    fn download(&self) -> usize {
+        self.download
+    }
+
+    fn upload(&self) -> usize {
+        self.upload
     }
 }

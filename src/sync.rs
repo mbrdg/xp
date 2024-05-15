@@ -6,7 +6,7 @@ use std::{
 use crate::{
     bloom::BloomFilter,
     crdt::{Decomposable, GSet},
-    tracker::{DefaultTracker, NetworkHop, Tracker},
+    tracker::{DefaultTracker, EventTracker, NetworkHop, SyncTracker},
 };
 
 pub trait Protocol {
@@ -35,13 +35,17 @@ impl Protocol for Baseline {
     type Replica = GSet<String>;
     type Tracker = DefaultTracker;
 
-    fn sync(&mut self) -> Self::Tracker {
-        let mut tracker = DefaultTracker::new(16_000);
+    fn sync(&mut self) -> DefaultTracker {
+        let (download, upload) = (32_000, 32_000);
+        let mut tracker = DefaultTracker::new(download, upload);
 
         // 1. Ship the full local state and send it the remote replica.
         let local_state = self.local.clone();
 
-        tracker.register(NetworkHop::LocalToRemote(Baseline::size_of(&local_state)));
+        tracker.register(NetworkHop::as_local_to_remote(
+            &tracker,
+            Baseline::size_of(&local_state),
+        ));
 
         // 2.1. Compute the optimal delta based on the remote replica state.
         let remote_unseen = local_state.difference(&self.remote);
@@ -51,13 +55,16 @@ impl Protocol for Baseline {
         self.remote.join(vec![remote_unseen]);
 
         // 2.3. Send back to the local replica the decompositions unknown to the local replica.
-        tracker.register(NetworkHop::RemoteToLocal(Baseline::size_of(&local_unseen)));
+        tracker.register(NetworkHop::as_remote_to_local(
+            &tracker,
+            Baseline::size_of(&local_unseen),
+        ));
 
         // 3. Merge the minimum delta received from the remote replica.
         self.local.join(vec![local_unseen]);
 
         // 4. Sanity check.
-        tracker.finish(
+        tracker.freeze(
             self.local
                 .elements()
                 .symmetric_difference(self.remote.elements())
@@ -93,6 +100,8 @@ impl Probabilistic {
 
     #[inline]
     fn size_of_filter(filter: &BloomFilter<String>) -> usize {
+        // TODO: assume a language agnostic attitude by remove the idiosyncrasies of rust, namely,
+        // `RandomState` to ensure that the replicas hash deterministically.
         let len = filter.as_bitslice().len();
         len / 8 + min(1, len % 8) + 2 * std::mem::size_of::<RandomState>()
     }
@@ -102,9 +111,11 @@ impl Protocol for Probabilistic {
     type Replica = GSet<String>;
     type Tracker = DefaultTracker;
 
-    fn sync(&mut self) -> Self::Tracker {
-        let mut tracker = DefaultTracker::new(16_000);
+    fn sync(&mut self) -> DefaultTracker {
         const FPR: f64 = 0.001; // 0.1 %
+
+        let (download, upload) = (32_000, 32_000);
+        let mut tracker = DefaultTracker::new(download, upload);
 
         // 1.1. Split the local state and insert each decomposition into a Bloom Filter.
         let local_split = self.local.split();
@@ -120,9 +131,10 @@ impl Protocol for Probabilistic {
         });
 
         // 1.2. Ship the Bloom filter to the remote replica.
-        tracker.register(NetworkHop::LocalToRemote(Probabilistic::size_of_filter(
-            &local_filter,
-        )));
+        tracker.register(NetworkHop::as_local_to_remote(
+            &tracker,
+            Probabilistic::size_of_filter(&local_filter),
+        ));
 
         // 2.1. At the remote replica, split the state into join decompositions. Then split the
         //   decompositions into common, i.e., present in both replicas, and unknown, i.e., present
@@ -149,7 +161,8 @@ impl Protocol for Probabilistic {
         });
 
         // 2.3. Send back to the remote replica the unknown decompositions and the Bloom Filter.
-        tracker.register(NetworkHop::RemoteToLocal(
+        tracker.register(NetworkHop::as_remote_to_local(
+            &tracker,
             Probabilistic::size_of_filter(&remote_filter)
                 + local_unkown
                     .iter()
@@ -173,7 +186,8 @@ impl Protocol for Probabilistic {
         self.local.join(local_unkown);
 
         // 3.3. Send to the remote replica the unkown decompositions.
-        tracker.register(NetworkHop::LocalToRemote(
+        tracker.register(NetworkHop::as_local_to_remote(
+            &tracker,
             remote_unknown.iter().map(Probabilistic::size_of).sum(),
         ));
 
@@ -182,7 +196,7 @@ impl Protocol for Probabilistic {
 
         // 5. Sanity check.
         // NOTE: This algorithm does not guarantee full state sync between replicas.
-        tracker.finish(
+        tracker.freeze(
             self.local
                 .elements()
                 .symmetric_difference(self.remote.elements())
@@ -218,10 +232,11 @@ impl<const B: usize> Protocol for BucketDispatcher<B> {
     type Replica = GSet<String>;
     type Tracker = DefaultTracker;
 
-    fn sync(&mut self) -> Self::Tracker {
-        let mut tracker = DefaultTracker::new(16_000);
-
+    fn sync(&mut self) -> DefaultTracker {
         const BUCKET: Vec<(GSet<String>, u64)> = Vec::new();
+
+        let (download, upload) = (32_000, 32_000);
+        let mut tracker = DefaultTracker::new(download, upload);
 
         let hasher = RandomState::new();
         let mut local_buckets = [BUCKET; B];
@@ -257,7 +272,10 @@ impl<const B: usize> Protocol for BucketDispatcher<B> {
         });
 
         // 1.4 Send the bucket hashes to the remote replica.
-        tracker.register(NetworkHop::LocalToRemote(std::mem::size_of::<u64>() * B));
+        tracker.register(NetworkHop::as_local_to_remote(
+            &tracker,
+            std::mem::size_of::<u64>() * B,
+        ));
 
         let mut remote_buckets = [BUCKET; B];
 
@@ -307,7 +325,8 @@ impl<const B: usize> Protocol for BucketDispatcher<B> {
             .collect();
 
         // 2.4. Send the aggregated bucket state back to the local replica.
-        tracker.register(NetworkHop::RemoteToLocal(
+        tracker.register(NetworkHop::as_remote_to_local(
+            &tracker,
             non_matching_buckets
                 .iter()
                 .flatten()
@@ -341,7 +360,8 @@ impl<const B: usize> Protocol for BucketDispatcher<B> {
         // 3.2. Join the buckets received from the remote replica that contain some state.
         self.local.join(local_unseen);
 
-        tracker.register(NetworkHop::LocalToRemote(
+        tracker.register(NetworkHop::as_local_to_remote(
+            &tracker,
             remote_unseen
                 .iter()
                 .map(BucketDispatcher::<B>::size_of)
@@ -352,7 +372,7 @@ impl<const B: usize> Protocol for BucketDispatcher<B> {
         self.remote.join(remote_unseen);
 
         // 5. Sanity check.
-        tracker.finish(
+        tracker.freeze(
             self.local
                 .elements()
                 .symmetric_difference(self.remote.elements())
