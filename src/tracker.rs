@@ -31,7 +31,7 @@ impl NetworkHop {
 
         Self::LocalToRemote {
             bytes,
-            duration: Duration::from_millis(u64::try_from(bytes / (upload * 1000)).unwrap()),
+            duration: Duration::from_millis(u64::try_from(bytes * 1000 / upload).unwrap()),
         }
     }
 
@@ -42,7 +42,7 @@ impl NetworkHop {
 
         Self::RemoteToLocal {
             bytes,
-            duration: Duration::from_millis(u64::try_from(bytes / (download * 1000)).unwrap()),
+            duration: Duration::from_millis(u64::try_from(bytes * 1000 / download).unwrap()),
         }
     }
 
