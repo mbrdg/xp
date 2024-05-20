@@ -32,7 +32,7 @@ def main() -> None:
 
     # Similarities
     start, stop, step = tuple(int(p) for p in lines[1].split(" ", 3))
-    similarity = np.arange(start, stop + 1, step)
+    dissimilarity = np.arange(start, stop + 1, step)
 
     # Create the plot environment
     fig, ax = plt.subplots(2, figsize=(8, 8))
@@ -41,7 +41,7 @@ def main() -> None:
     ax[0].xaxis.set_major_formatter(ticker.PercentFormatter(stop))
     ax[0].set(
         title="Transmitted bytes",
-        xlabel="similarity",
+        xlabel="dissimilarity",
         xmargin=0,
         ylabel="transmitted (Bytes)",
     )
@@ -49,7 +49,7 @@ def main() -> None:
     ax[1].xaxis.set_major_formatter(ticker.PercentFormatter(stop))
     ax[1].set(
         title=f"Time to sync \n {config.upload}/{config.download} B/s up/down",
-        xlabel="similarity",
+        xlabel="dissimilarity",
         xmargin=0,
         ylabel="time (s)",
     )
@@ -72,17 +72,17 @@ def main() -> None:
         hops[proto].append(int(run_params[2]))
 
     for proto, b in exchanged_bytes.items():
-        ax[0].plot(similarity, b, label=proto, linestyle=":")
+        ax[0].plot(dissimilarity, b, label=proto, linestyle=":")
 
     for proto, d in durations.items():
-        ax[1].plot(similarity, d, label=proto, linestyle=":")
+        ax[1].plot(dissimilarity, d, label=proto, linestyle=":")
 
     for proto, h in hops.items():
         print(f"{proto} avg. {np.mean(h)} hops")
 
     # Print the labels for each proto before finish
     ax[0].legend(loc="lower right", fontsize="small")
-    ax[1].legend(fontsize="small")
+    ax[1].legend(loc="lower right", fontsize="small")
     fig.tight_layout()
 
     plt.show()

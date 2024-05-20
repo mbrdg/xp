@@ -91,17 +91,20 @@ fn main() {
         print_stats("baseline", s, baseline);
 
         // NOTE: The number of buckets must increase accordingly to the set's size.
-        let buckets_1024 = Buckets::<1024>::new(local.clone(), remote.clone()).sync();
-        print_stats("buckets<1024>", s, buckets_1024);
+        let buckets_2k = Buckets::<2000>::new(local.clone(), remote.clone()).sync();
+        print_stats("buckets<2k>", s, buckets_2k);
 
-        let buckets_2048 = Buckets::<2048>::new(local.clone(), remote.clone()).sync();
-        print_stats("buckets<2048>", s, buckets_2048);
+        let buckets_5k = Buckets::<5000>::new(local.clone(), remote.clone()).sync();
+        print_stats("buckets<5k>", s, buckets_5k);
 
-        let buckets_4096 = Buckets::<4096>::new(local.clone(), remote.clone()).sync();
-        print_stats("buckets<4096>", s, buckets_4096);
+        let buckets_10k = Buckets::<10_000>::new(local.clone(), remote.clone()).sync();
+        print_stats("buckets<10k>", s, buckets_10k);
 
-        let buckets_8192 = Buckets::<8192>::new(local.clone(), remote.clone()).sync();
-        print_stats("buckets<8192>", s, buckets_8192);
+        let buckets_25k = Buckets::<25_000>::new(local.clone(), remote.clone()).sync();
+        print_stats("buckets<25k>", s, buckets_25k);
+
+        let buckets_50k = Buckets::<50_000>::new(local.clone(), remote.clone()).sync();
+        print_stats("buckets<50k>", s, buckets_50k);
     }
 
     eprintln!("time elapsed {:.3?}", start.elapsed());
