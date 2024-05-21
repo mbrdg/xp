@@ -1,11 +1,15 @@
-use std::{collections::HashSet, hash::Hash};
+use std::{
+    cmp::max,
+    collections::{HashMap, HashSet},
+    hash::Hash,
+};
 
 pub trait Decomposable {
-    type Output;
+    type Delta;
 
-    fn split(&self) -> Vec<Self::Output>;
-    fn join(&mut self, deltas: Vec<Self::Output>);
-    fn difference(&self, remote: &Self::Output) -> Self::Output;
+    fn split(&self) -> Vec<Self::Delta>;
+    fn join(&mut self, deltas: Vec<Self::Delta>);
+    fn difference(&self, remote: &Self::Delta) -> Self::Delta;
 }
 
 #[derive(Clone, Debug, Default)]
@@ -62,9 +66,9 @@ impl<T> Decomposable for GSet<T>
 where
     T: Eq + Hash + Clone,
 {
-    type Output = GSet<T>;
+    type Delta = GSet<T>;
 
-    fn split(&self) -> Vec<Self::Output> {
+    fn split(&self) -> Vec<Self::Delta> {
         self.base
             .iter()
             .cloned()
@@ -74,13 +78,13 @@ where
             .collect()
     }
 
-    fn join(&mut self, deltas: Vec<Self::Output>) {
+    fn join(&mut self, deltas: Vec<Self::Delta>) {
         deltas
             .into_iter()
             .for_each(|delta| self.base.extend(delta.base))
     }
 
-    fn difference(&self, remote: &Self::Output) -> Self::Output {
+    fn difference(&self, remote: &Self::Delta) -> Self::Delta {
         Self {
             base: self.base.difference(&remote.base).cloned().collect(),
         }
@@ -99,7 +103,7 @@ where
 impl<T> Eq for GSet<T> where T: Eq + Hash {}
 
 #[cfg(test)]
-mod tests {
+mod gset {
     use super::*;
 
     #[test]
@@ -150,5 +154,130 @@ mod tests {
 
         let diff = local.difference(&remote);
         assert!(diff.is_empty());
+    }
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct GCounter<I> {
+    base: HashMap<I, i32>,
+}
+
+impl<I> GCounter<I>
+where
+    I: Clone + Eq + Hash,
+{
+    #[inline]
+    #[must_use]
+    pub fn new() -> Self {
+        Self {
+            base: HashMap::new(),
+        }
+    }
+
+    #[inline]
+    pub fn count(&self) -> i32 {
+        self.base.values().sum()
+    }
+
+    pub fn increment(&mut self, id: &I) -> Self {
+        let increments = self
+            .base
+            .entry(id.clone())
+            .and_modify(|inc| *inc += 1)
+            .or_insert(1);
+
+        Self {
+            base: HashMap::from([(id.clone(), *increments)]),
+        }
+    }
+}
+
+impl<I> Decomposable for GCounter<I>
+where
+    I: Clone + Eq + Hash,
+{
+    type Delta = GCounter<I>;
+
+    fn split(&self) -> Vec<Self::Delta> {
+        self.base
+            .clone()
+            .into_iter()
+            .map(|entry| Self {
+                base: HashMap::from([entry]),
+            })
+            .collect()
+    }
+
+    fn join(&mut self, deltas: Vec<Self::Delta>) {
+        deltas.into_iter().for_each(|delta| {
+            delta.base.into_iter().for_each(|(id, v)| {
+                self.base
+                    .entry(id)
+                    .and_modify(|inc| *inc = max(*inc, v))
+                    .or_insert(v);
+            })
+        })
+    }
+
+    fn difference(&self, remote: &Self::Delta) -> Self::Delta {
+        Self {
+            base: HashMap::from_iter(self.base.clone().into_iter().filter(|(id, inc)| {
+                remote.base.get(id).is_none() || remote.base.get(id).is_some_and(|v| v < inc)
+            })),
+        }
+    }
+}
+
+#[cfg(test)]
+mod gcounter {
+    use super::*;
+
+    #[test]
+    fn test_increment() {
+        let mut gcounter = GCounter::new();
+
+        gcounter.increment(&1);
+        gcounter.increment(&2);
+        gcounter.increment(&3);
+        gcounter.increment(&1);
+
+        assert_eq!(gcounter.count(), 4);
+    }
+
+    #[test]
+    fn test_split_and_join() {
+        let splittable = GCounter {
+            base: HashMap::from([(1, 1), (2, 2), (3, 1)]),
+        };
+
+        let decompositions = splittable.split();
+        assert_eq!(decompositions.len(), 3);
+
+        let mut joinable = GCounter::new();
+
+        joinable.join(decompositions);
+        assert_eq!(joinable.count(), 4);
+        assert_eq!(splittable.base, joinable.base);
+    }
+
+    #[test]
+    fn test_difference() {
+        let local = GCounter {
+            base: HashMap::from([(1, 1), (2, 3), (3, 2), (4, 1)]),
+        };
+
+        let mut remote = GCounter {
+            base: HashMap::from([(1, 1), (2, 2), (3, 4), (5, 1)]),
+        };
+
+        let diff = local.difference(&remote);
+        assert_eq!(diff.count(), 4);
+
+        remote.join(vec![diff]);
+        assert_eq!(remote.count(), 10);
+        assert_eq!(
+            remote.base,
+            HashMap::from([(1, 1), (2, 3), (3, 4), (4, 1), (5, 1)])
+        );
     }
 }
