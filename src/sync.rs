@@ -177,14 +177,17 @@ impl Protocol for BloomBased {
         // 3.1. At the local replica, split the state into join decompositions. Then split the
         //   decompositions into common, i.e., present in both replicas, and unknown, i.e., present
         //   locally but not remotely.
-        let (_, remote_unknown): (Vec<_>, Vec<_>) = local_split.into_iter().partition(|delta| {
-            let item = delta
-                .elements()
-                .iter()
-                .next()
-                .expect("a decomposition should have a single item");
-            remote_filter.contains(item)
-        });
+        let remote_unknown: Vec<_> = local_split
+            .into_iter()
+            .partition(|delta| {
+                let item = delta
+                    .elements()
+                    .iter()
+                    .next()
+                    .expect("a decomposition should have a single item");
+                remote_filter.contains(item)
+            })
+            .1;
 
         // 3.2. Join the incoming local unknown decompositons.
         self.local.join(local_unkown);
