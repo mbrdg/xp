@@ -221,9 +221,15 @@ where
 
     fn difference(&self, remote: &Self::Decomposition) -> Self::Decomposition {
         Self {
-            base: HashMap::from_iter(self.base.clone().into_iter().filter(|(id, inc)| {
-                remote.base.get(id).is_none() || remote.base.get(id).is_some_and(|v| v < inc)
-            })),
+            base: HashMap::from_iter(
+                self.base
+                    .iter()
+                    .filter(|(id, inc)| {
+                        let entry = remote.base.get(id);
+                        entry.is_none() || entry.is_some_and(|v| *inc > v)
+                    })
+                    .map(|(id, inc)| (id.clone(), *inc)),
+            ),
         }
     }
 }
