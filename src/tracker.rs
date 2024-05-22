@@ -1,17 +1,5 @@
 use std::time::Duration;
 
-pub trait EventTracker {
-    type Event;
-
-    fn register(&mut self, event: Self::Event);
-    fn events(&self) -> &Vec<Self::Event>;
-}
-
-pub trait SyncTracker {
-    fn freeze(&mut self, diffs: usize);
-    fn diffs(&self) -> Result<usize, &str>;
-}
-
 #[derive(Debug)]
 pub enum NetworkHop {
     LocalToRemote { bytes: usize, duration: Duration },
@@ -57,8 +45,8 @@ impl NetworkHop {
 }
 
 #[derive(Debug, Default)]
-pub struct DefaultTracker<E = NetworkHop> {
-    events: Vec<E>,
+pub struct DefaultTracker {
+    events: Vec<NetworkHop>,
     diffs: Option<usize>,
     download: usize,
     upload: usize,
@@ -72,11 +60,33 @@ impl DefaultTracker {
         assert!(upload > 0, "upload should be greater than 0");
 
         Self {
-            events: vec![],
+            events: Vec::with_capacity(4),
             diffs: None,
             download,
             upload,
         }
+    }
+
+    pub fn register(&mut self, event: NetworkHop) {
+        if self.diffs.is_none() {
+            self.events.push(event);
+        }
+    }
+
+    pub fn finish(&mut self, diffs: usize) {
+        if self.diffs.is_none() {
+            self.diffs = Some(diffs)
+        }
+    }
+
+    #[inline]
+    pub fn events(&self) -> &Vec<NetworkHop> {
+        &self.events
+    }
+
+    #[inline]
+    pub fn diffs(&self) -> &Option<usize> {
+        &self.diffs
     }
 
     #[inline]
@@ -87,32 +97,5 @@ impl DefaultTracker {
     #[inline]
     pub fn upload(&self) -> usize {
         self.upload
-    }
-}
-
-impl EventTracker for DefaultTracker {
-    type Event = NetworkHop;
-
-    fn register(&mut self, event: NetworkHop) {
-        if self.diffs.is_none() {
-            self.events.push(event)
-        }
-    }
-
-    fn events(&self) -> &Vec<NetworkHop> {
-        &self.events
-    }
-}
-
-impl SyncTracker for DefaultTracker {
-    fn freeze(&mut self, diffs: usize) {
-        if self.diffs.is_none() {
-            self.diffs = Some(diffs)
-        }
-    }
-
-    fn diffs(&self) -> Result<usize, &str> {
-        self.diffs
-            .ok_or("`freeze()` should be called before getting the diffs")
     }
 }

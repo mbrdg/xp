@@ -6,7 +6,7 @@ use std::{
 use crate::{
     bloom::BloomFilter,
     crdt::{Decomposable, GSet},
-    tracker::{DefaultTracker, EventTracker, NetworkHop, SyncTracker},
+    tracker::{DefaultTracker, NetworkHop},
 };
 
 pub trait Protocol {
@@ -36,6 +36,11 @@ impl Protocol for Baseline {
     type Tracker = DefaultTracker;
 
     fn sync(&mut self, tracker: &mut Self::Tracker) {
+        assert!(
+            tracker.events().is_empty() && tracker.diffs().is_none(),
+            "tracker should be empty and not finished"
+        );
+
         // 1. Ship the full local state and send it the remote replica.
         let local_state = self.local.clone();
 
@@ -61,7 +66,7 @@ impl Protocol for Baseline {
         self.local.join(vec![local_unseen]);
 
         // 4. Sanity check.
-        tracker.freeze(
+        tracker.finish(
             self.local
                 .elements()
                 .symmetric_difference(self.remote.elements())
@@ -114,6 +119,11 @@ impl Protocol for BloomBased {
     type Tracker = DefaultTracker;
 
     fn sync(&mut self, tracker: &mut Self::Tracker) {
+        assert!(
+            tracker.events().is_empty() && tracker.diffs().is_none(),
+            "tracker should be empty and not finished"
+        );
+
         // 1.1. Split the local state and insert each decomposition into a Bloom Filter.
         let local_split = self.local.split();
         let mut local_filter = BloomFilter::new(local_split.len(), self.fpr);
@@ -193,7 +203,7 @@ impl Protocol for BloomBased {
 
         // 5. Sanity check.
         // NOTE: This algorithm does not guarantee full state sync between replicas.
-        tracker.freeze(
+        tracker.finish(
             self.local
                 .elements()
                 .symmetric_difference(self.remote.elements())
@@ -228,6 +238,11 @@ impl<const B: usize> Protocol for Buckets<B> {
     type Tracker = DefaultTracker;
 
     fn sync(&mut self, tracker: &mut Self::Tracker) {
+        assert!(
+            tracker.events().is_empty() && tracker.diffs().is_none(),
+            "tracker should be empty and not finished"
+        );
+
         const BUCKET: Vec<(GSet<String>, u64)> = Vec::new();
 
         let hasher = RandomState::new();
@@ -361,7 +376,7 @@ impl<const B: usize> Protocol for Buckets<B> {
         self.remote.join(remote_unseen);
 
         // 5. Sanity check.
-        tracker.freeze(
+        tracker.finish(
             self.local
                 .elements()
                 .symmetric_difference(self.remote.elements())

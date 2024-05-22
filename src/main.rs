@@ -5,7 +5,7 @@ use std::time::{Duration, Instant};
 use crate::{
     crdt::GSet,
     sync::{Baseline, Buckets, Protocol},
-    tracker::{EventTracker, NetworkHop},
+    tracker::NetworkHop,
 };
 use rand::{
     distributions::{Alphanumeric, DistString},
