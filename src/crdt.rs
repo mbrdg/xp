@@ -5,11 +5,11 @@ use std::{
 };
 
 pub trait Decomposable {
-    type Delta;
+    type Decomposition;
 
-    fn split(&self) -> Vec<Self::Delta>;
-    fn join(&mut self, deltas: Vec<Self::Delta>);
-    fn difference(&self, remote: &Self::Delta) -> Self::Delta;
+    fn split(&self) -> Vec<Self::Decomposition>;
+    fn join(&mut self, deltas: Vec<Self::Decomposition>);
+    fn difference(&self, remote: &Self::Decomposition) -> Self::Decomposition;
 }
 
 #[derive(Clone, Debug, Default)]
@@ -66,9 +66,9 @@ impl<T> Decomposable for GSet<T>
 where
     T: Eq + Hash + Clone,
 {
-    type Delta = GSet<T>;
+    type Decomposition = GSet<T>;
 
-    fn split(&self) -> Vec<Self::Delta> {
+    fn split(&self) -> Vec<Self::Decomposition> {
         self.base
             .iter()
             .cloned()
@@ -78,13 +78,13 @@ where
             .collect()
     }
 
-    fn join(&mut self, deltas: Vec<Self::Delta>) {
+    fn join(&mut self, deltas: Vec<Self::Decomposition>) {
         deltas
             .into_iter()
             .for_each(|delta| self.base.extend(delta.base))
     }
 
-    fn difference(&self, remote: &Self::Delta) -> Self::Delta {
+    fn difference(&self, remote: &Self::Decomposition) -> Self::Decomposition {
         Self {
             base: self.base.difference(&remote.base).cloned().collect(),
         }
@@ -196,9 +196,9 @@ impl<I> Decomposable for GCounter<I>
 where
     I: Clone + Eq + Hash,
 {
-    type Delta = GCounter<I>;
+    type Decomposition = GCounter<I>;
 
-    fn split(&self) -> Vec<Self::Delta> {
+    fn split(&self) -> Vec<Self::Decomposition> {
         self.base
             .clone()
             .into_iter()
@@ -208,7 +208,7 @@ where
             .collect()
     }
 
-    fn join(&mut self, deltas: Vec<Self::Delta>) {
+    fn join(&mut self, deltas: Vec<Self::Decomposition>) {
         deltas.into_iter().for_each(|delta| {
             delta.base.into_iter().for_each(|(id, v)| {
                 self.base
@@ -219,7 +219,7 @@ where
         })
     }
 
-    fn difference(&self, remote: &Self::Delta) -> Self::Delta {
+    fn difference(&self, remote: &Self::Decomposition) -> Self::Decomposition {
         Self {
             base: HashMap::from_iter(self.base.clone().into_iter().filter(|(id, inc)| {
                 remote.base.get(id).is_none() || remote.base.get(id).is_some_and(|v| v < inc)
