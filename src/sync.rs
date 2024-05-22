@@ -89,13 +89,20 @@ impl Protocol for Baseline {
 pub struct BloomBased {
     local: GSet<String>,
     remote: GSet<String>,
+    fpr: f64,
 }
 
 impl BloomBased {
     #[inline]
     #[must_use]
     pub fn new(local: GSet<String>, remote: GSet<String>) -> Self {
-        Self { local, remote }
+        Self::with_fpr(local, remote, 0.001) // 0.01 %
+    }
+
+    #[inline]
+    #[must_use]
+    pub fn with_fpr(local: GSet<String>, remote: GSet<String>, fpr: f64) -> Self {
+        Self { local, remote, fpr }
     }
 
     #[inline]
@@ -119,7 +126,7 @@ impl Protocol for BloomBased {
 
         // 1.1. Split the local state and insert each decomposition into a Bloom Filter.
         let local_split = self.local.split();
-        let mut local_filter = BloomFilter::new(local_split.len(), FPR);
+        let mut local_filter = BloomFilter::new(local_split.len(), self.fpr);
 
         local_split.iter().for_each(|delta| {
             let item = delta
@@ -150,7 +157,7 @@ impl Protocol for BloomBased {
             });
 
         // 2.2. From the common partions build a Bloom Filter.
-        let mut remote_filter = BloomFilter::new(common.len(), FPR);
+        let mut remote_filter = BloomFilter::new(common.len(), self.fpr);
         common.into_iter().for_each(|delta| {
             let item = delta
                 .elements()
