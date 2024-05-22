@@ -12,11 +12,6 @@ pub trait SyncTracker {
     fn diffs(&self) -> Result<usize, &str>;
 }
 
-pub trait NetworkTracker {
-    fn download(&self) -> usize;
-    fn upload(&self) -> usize;
-}
-
 #[derive(Debug)]
 pub enum NetworkHop {
     LocalToRemote { bytes: usize, duration: Duration },
@@ -62,8 +57,8 @@ impl NetworkHop {
 }
 
 #[derive(Debug, Default)]
-pub struct DefaultTracker {
-    events: Vec<NetworkHop>,
+pub struct DefaultTracker<E = NetworkHop> {
+    events: Vec<E>,
     diffs: Option<usize>,
     download: usize,
     upload: usize,
@@ -82,6 +77,16 @@ impl DefaultTracker {
             download,
             upload,
         }
+    }
+
+    #[inline]
+    pub fn download(&self) -> usize {
+        self.download
+    }
+
+    #[inline]
+    pub fn upload(&self) -> usize {
+        self.upload
     }
 }
 
@@ -109,15 +114,5 @@ impl SyncTracker for DefaultTracker {
     fn diffs(&self) -> Result<usize, &str> {
         self.diffs
             .ok_or("`freeze()` should be called before getting the diffs")
-    }
-}
-
-impl NetworkTracker for DefaultTracker {
-    fn download(&self) -> usize {
-        self.download
-    }
-
-    fn upload(&self) -> usize {
-        self.upload
     }
 }
