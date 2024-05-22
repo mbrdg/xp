@@ -84,26 +84,59 @@ fn main() {
     let (similarity, step) = (0..=100, 5);
     println!("{} {} {step}", similarity.start(), similarity.end());
 
+    // NOTE: These values are in Bytes/sec.
+    let (download, upload) = (32_000, 32_000);
+
     for s in similarity.rev().step_by(5) {
         let (local, remote) = populate_replicas(item_count, item_size, s, seed);
 
-        let baseline = Baseline::new(local.clone(), remote.clone()).sync();
+        let baseline = {
+            let mut tracker = DefaultTracker::new(download, upload);
+            Baseline::new(local.clone(), remote.clone()).sync(&mut tracker);
+            tracker
+        };
+
         print_stats("baseline", s, baseline);
 
-        // NOTE: The number of buckets must increase accordingly to the set's size.
-        let buckets_2k = Buckets::<2000>::new(local.clone(), remote.clone()).sync();
+        // NOTE: The number of buckets should increase accordingly to the set's size.
+        let buckets_2k = {
+            let mut tracker = DefaultTracker::new(download, upload);
+            Buckets::<2_000>::new(local.clone(), remote.clone()).sync(&mut tracker);
+            tracker
+        };
+
         print_stats("buckets<2k>", s, buckets_2k);
 
-        let buckets_5k = Buckets::<5000>::new(local.clone(), remote.clone()).sync();
+        let buckets_5k = {
+            let mut tracker = DefaultTracker::new(download, upload);
+            Buckets::<5_000>::new(local.clone(), remote.clone()).sync(&mut tracker);
+            tracker
+        };
+
         print_stats("buckets<5k>", s, buckets_5k);
 
-        let buckets_10k = Buckets::<10_000>::new(local.clone(), remote.clone()).sync();
+        let buckets_10k = {
+            let mut tracker = DefaultTracker::new(download, upload);
+            Buckets::<10_000>::new(local.clone(), remote.clone()).sync(&mut tracker);
+            tracker
+        };
+
         print_stats("buckets<10k>", s, buckets_10k);
 
-        let buckets_25k = Buckets::<25_000>::new(local.clone(), remote.clone()).sync();
-        print_stats("buckets<25k>", s, buckets_25k);
+        let buckets_20k = {
+            let mut tracker = DefaultTracker::new(download, upload);
+            Buckets::<20_000>::new(local.clone(), remote.clone()).sync(&mut tracker);
+            tracker
+        };
 
-        let buckets_50k = Buckets::<50_000>::new(local.clone(), remote.clone()).sync();
+        print_stats("buckets<20k>", s, buckets_20k);
+
+        let buckets_50k = {
+            let mut tracker = DefaultTracker::new(download, upload);
+            Buckets::<50_000>::new(local.clone(), remote.clone()).sync(&mut tracker);
+            tracker
+        };
+
         print_stats("buckets<50k>", s, buckets_50k);
     }
 

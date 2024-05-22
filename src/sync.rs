@@ -6,14 +6,14 @@ use std::{
 use crate::{
     bloom::BloomFilter,
     crdt::{Decomposable, GSet},
-    tracker::{DefaultTracker, EventTracker, NetworkHop, NetworkTracker, SyncTracker},
+    tracker::{DefaultTracker, EventTracker, NetworkHop, SyncTracker},
 };
 
 pub trait Protocol {
     type Replica;
     type Tracker;
 
-    fn sync(&mut self) -> Self::Tracker;
+    fn sync(&mut self, tracker: &mut Self::Tracker);
     fn size_of(replica: &Self::Replica) -> usize;
     fn is_synced(&self) -> bool;
 }
@@ -35,10 +35,7 @@ impl Protocol for Baseline {
     type Replica = GSet<String>;
     type Tracker = DefaultTracker;
 
-    fn sync(&mut self) -> DefaultTracker {
-        let (download, upload) = (32_000, 32_000);
-        let mut tracker = DefaultTracker::new(download, upload);
-
+    fn sync(&mut self, tracker: &mut Self::Tracker) {
         // 1. Ship the full local state and send it the remote replica.
         let local_state = self.local.clone();
 
@@ -73,8 +70,6 @@ impl Protocol for Baseline {
 
         // NOTE: This algorithm guarantees that replicas sync given that no operations occur.
         assert!(self.is_synced());
-
-        tracker
     }
 
     fn size_of(replica: &Self::Replica) -> usize {
@@ -118,12 +113,7 @@ impl Protocol for BloomBased {
     type Replica = GSet<String>;
     type Tracker = DefaultTracker;
 
-    fn sync(&mut self) -> DefaultTracker {
-        const FPR: f64 = 0.001; // 0.1 %
-
-        let (download, upload) = (32_000, 32_000);
-        let mut tracker = DefaultTracker::new(download, upload);
-
+    fn sync(&mut self, tracker: &mut Self::Tracker) {
         // 1.1. Split the local state and insert each decomposition into a Bloom Filter.
         let local_split = self.local.split();
         let mut local_filter = BloomFilter::new(local_split.len(), self.fpr);
@@ -209,8 +199,6 @@ impl Protocol for BloomBased {
                 .symmetric_difference(self.remote.elements())
                 .count(),
         );
-
-        tracker
     }
 
     fn size_of(replica: &Self::Replica) -> usize {
@@ -239,11 +227,8 @@ impl<const B: usize> Protocol for Buckets<B> {
     type Replica = GSet<String>;
     type Tracker = DefaultTracker;
 
-    fn sync(&mut self) -> DefaultTracker {
+    fn sync(&mut self, tracker: &mut Self::Tracker) {
         const BUCKET: Vec<(GSet<String>, u64)> = Vec::new();
-
-        let (download, upload) = (32_000, 32_000);
-        let mut tracker = DefaultTracker::new(download, upload);
 
         let hasher = RandomState::new();
         let mut local_buckets = [BUCKET; B];
@@ -385,8 +370,6 @@ impl<const B: usize> Protocol for Buckets<B> {
 
         // NOTE: This algorithm guarantees that replicas sync given that no operations occur.
         assert!(self.is_synced());
-
-        tracker
     }
 
     fn size_of(replica: &Self::Replica) -> usize {
