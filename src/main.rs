@@ -55,19 +55,9 @@ fn populate_replicas(
 }
 
 fn print_stats(protocol: &str, similarity: usize, tracker: DefaultTracker) {
-    let (hops, duration, bytes) = (
-        tracker.events().len(),
-        tracker
-            .events()
-            .iter()
-            .map(NetworkHop::duration)
-            .sum::<Duration>(),
-        tracker
-            .events()
-            .iter()
-            .map(NetworkHop::bytes)
-            .sum::<usize>(),
-    );
+    let hops = tracker.events().len();
+    let duration: Duration = tracker.events().iter().map(NetworkHop::duration).sum();
+    let bytes: usize = tracker.events().iter().map(NetworkHop::bytes).sum();
 
     println!(
         "{protocol} {similarity} {hops} {:.3} {bytes}",
