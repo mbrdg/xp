@@ -3,18 +3,17 @@ use std::{
     collections::BTreeMap,
     hash::{BuildHasher, RandomState},
     iter::zip,
-    usize,
 };
 
 use crate::{
     bloom::BloomFilter,
     crdt::{Decomposable, GSet},
-    tracker::{DefaultTracker, NetworkHop},
+    tracker::{DefaultTracker, NetworkEvent, Tracker},
 };
 
 pub trait Protocol {
     type Replica: Decomposable;
-    type Tracker;
+    type Tracker: Tracker;
 
     fn sync(&mut self, tracker: &mut Self::Tracker);
     fn size_of(replica: &Self::Replica) -> usize;
@@ -47,7 +46,7 @@ impl Protocol for Baseline {
         // 1. Ship the full local state and send it the remote replica.
         let local_state = self.local.clone();
 
-        tracker.register(NetworkHop::as_local_to_remote(
+        tracker.register(NetworkEvent::as_local_to_remote(
             tracker.upload(),
             Baseline::size_of(&local_state),
         ));
@@ -60,7 +59,7 @@ impl Protocol for Baseline {
         self.remote.join(vec![remote_unseen]);
 
         // 2.3. Send back to the local replica the decompositions unknown to the local replica.
-        tracker.register(NetworkHop::as_remote_to_local(
+        tracker.register(NetworkEvent::as_remote_to_local(
             tracker.download(),
             Baseline::size_of(&local_unseen),
         ));
@@ -141,7 +140,7 @@ impl Protocol for BloomBased {
         });
 
         // 1.2. Ship the Bloom filter to the remote replica.
-        tracker.register(NetworkHop::as_local_to_remote(
+        tracker.register(NetworkEvent::as_local_to_remote(
             tracker.upload(),
             BloomBased::size_of_filter(&local_filter),
         ));
@@ -171,7 +170,7 @@ impl Protocol for BloomBased {
         });
 
         // 2.3. Send back to the remote replica the unknown decompositions and the Bloom Filter.
-        tracker.register(NetworkHop::as_remote_to_local(
+        tracker.register(NetworkEvent::as_remote_to_local(
             tracker.download(),
             BloomBased::size_of_filter(&remote_filter)
                 + local_unkown.iter().map(BloomBased::size_of).sum::<usize>(),
@@ -196,7 +195,7 @@ impl Protocol for BloomBased {
         self.local.join(local_unkown);
 
         // 3.3. Send to the remote replica the unkown decompositions.
-        tracker.register(NetworkHop::as_local_to_remote(
+        tracker.register(NetworkEvent::as_local_to_remote(
             tracker.upload(),
             remote_unknown.iter().map(BloomBased::size_of).sum(),
         ));
@@ -294,7 +293,7 @@ impl<const B: usize> Protocol for Buckets<B> {
         let local_hashes = Buckets::<B>::build_hashes(&local_buckets, &self.hasher);
 
         // 1.2 Send the bucket hashes to the remote replica.
-        tracker.register(NetworkHop::as_local_to_remote(
+        tracker.register(NetworkEvent::as_local_to_remote(
             tracker.upload(),
             std::mem::size_of::<u64>() * local_hashes.len(),
         ));
@@ -322,7 +321,7 @@ impl<const B: usize> Protocol for Buckets<B> {
             .collect();
 
         // 2.4. Send the aggregated bucket state back to the local replica.
-        tracker.register(NetworkHop::as_remote_to_local(
+        tracker.register(NetworkEvent::as_remote_to_local(
             tracker.download(),
             non_matching_buckets.len()
                 + non_matching_buckets
@@ -350,7 +349,7 @@ impl<const B: usize> Protocol for Buckets<B> {
         // 3.2. Join the buckets received from the remote replica that contain some state.
         self.local.join(local_unseen);
 
-        tracker.register(NetworkHop::as_local_to_remote(
+        tracker.register(NetworkEvent::as_local_to_remote(
             tracker.upload(),
             remote_unseen.iter().map(Buckets::<B>::size_of).sum(),
         ));

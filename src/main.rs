@@ -5,7 +5,7 @@ use std::time::{Duration, Instant};
 use crate::{
     crdt::GSet,
     sync::{Baseline, Buckets, Protocol},
-    tracker::NetworkHop,
+    tracker::NetworkEvent,
 };
 use rand::{
     distributions::{Alphanumeric, DistString},
@@ -13,7 +13,7 @@ use rand::{
     rngs::StdRng,
     SeedableRng,
 };
-use tracker::DefaultTracker;
+use tracker::{DefaultTracker, Tracker};
 
 mod bloom;
 mod crdt;
@@ -56,8 +56,8 @@ fn populate_replicas(
 
 fn print_stats(protocol: &str, similarity: usize, tracker: DefaultTracker) {
     let hops = tracker.events().len();
-    let duration: Duration = tracker.events().iter().map(NetworkHop::duration).sum();
-    let bytes: usize = tracker.events().iter().map(NetworkHop::bytes).sum();
+    let duration: Duration = tracker.events().iter().map(NetworkEvent::duration).sum();
+    let bytes: usize = tracker.events().iter().map(NetworkEvent::bytes).sum();
 
     println!(
         "{protocol} {similarity} {hops} {:.3} {bytes}",

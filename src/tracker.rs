@@ -1,12 +1,22 @@
 use std::time::Duration;
 
+pub trait Event {}
+pub trait Tracker {
+    type Event: Event;
+
+    fn register(&mut self, event: Self::Event);
+    fn events(&self) -> &Vec<Self::Event>;
+    fn finish(&mut self, diffs: usize);
+    fn diffs(&self) -> Option<usize>;
+}
+
 #[derive(Debug)]
-pub enum NetworkHop {
+pub enum NetworkEvent {
     LocalToRemote { bytes: usize, duration: Duration },
     RemoteToLocal { bytes: usize, duration: Duration },
 }
 
-impl NetworkHop {
+impl NetworkEvent {
     #[inline]
     #[must_use]
     pub fn as_local_to_remote(upload: usize, bytes: usize) -> Self {
@@ -44,15 +54,20 @@ impl NetworkHop {
     }
 }
 
+impl Event for NetworkEvent {}
+
 #[derive(Debug, Default)]
-pub struct DefaultTracker {
-    events: Vec<NetworkHop>,
+pub struct DefaultTracker<E = NetworkEvent> {
+    events: Vec<E>,
     diffs: Option<usize>,
     download: usize,
     upload: usize,
 }
 
-impl DefaultTracker {
+impl<E> DefaultTracker<E>
+where
+    E: Event,
+{
     #[inline]
     #[must_use]
     pub fn new(download: usize, upload: usize) -> Self {
@@ -67,28 +82,6 @@ impl DefaultTracker {
         }
     }
 
-    pub fn register(&mut self, event: NetworkHop) {
-        if self.diffs.is_none() {
-            self.events.push(event);
-        }
-    }
-
-    pub fn finish(&mut self, diffs: usize) {
-        if self.diffs.is_none() {
-            self.diffs = Some(diffs)
-        }
-    }
-
-    #[inline]
-    pub fn events(&self) -> &Vec<NetworkHop> {
-        &self.events
-    }
-
-    #[inline]
-    pub fn diffs(&self) -> &Option<usize> {
-        &self.diffs
-    }
-
     #[inline]
     pub fn download(&self) -> usize {
         self.download
@@ -97,5 +90,32 @@ impl DefaultTracker {
     #[inline]
     pub fn upload(&self) -> usize {
         self.upload
+    }
+}
+
+impl<E> Tracker for DefaultTracker<E>
+where
+    E: Event,
+{
+    type Event = E;
+
+    fn register(&mut self, event: Self::Event) {
+        if self.diffs.is_none() {
+            self.events.push(event);
+        }
+    }
+
+    fn events(&self) -> &Vec<Self::Event> {
+        &self.events
+    }
+
+    fn finish(&mut self, diffs: usize) {
+        if self.diffs.is_none() {
+            self.diffs = Some(diffs)
+        }
+    }
+
+    fn diffs(&self) -> Option<usize> {
+        self.diffs
     }
 }
