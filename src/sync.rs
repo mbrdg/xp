@@ -10,7 +10,7 @@ use crate::{
 };
 
 pub trait Protocol {
-    type Replica;
+    type Replica: Decomposable;
     type Tracker;
 
     fn sync(&mut self, tracker: &mut Self::Tracker);
