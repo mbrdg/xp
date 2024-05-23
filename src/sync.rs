@@ -1,6 +1,9 @@
 use std::{
     cmp::min,
+    collections::BTreeMap,
     hash::{BuildHasher, RandomState},
+    iter::zip,
+    usize,
 };
 
 use crate::{
@@ -220,16 +223,57 @@ impl Protocol for BloomBased {
     }
 }
 
+type Bucket<T> = BTreeMap<u64, T>;
 pub struct Buckets<const B: usize> {
     local: GSet<String>,
     remote: GSet<String>,
+    hasher: RandomState,
 }
 
 impl<const B: usize> Buckets<B> {
     #[inline]
     #[must_use]
     pub fn new(local: GSet<String>, remote: GSet<String>) -> Self {
-        Self { local, remote }
+        Self {
+            local,
+            remote,
+            hasher: RandomState::new(),
+        }
+    }
+
+    fn build_buckets(
+        replica: &GSet<String>,
+        hasher: &RandomState,
+        len: usize,
+    ) -> Vec<Bucket<GSet<String>>> {
+        let mut buckets = vec![BTreeMap::new(); len];
+
+        replica.split().into_iter().for_each(|delta| {
+            let item = delta
+                .elements()
+                .iter()
+                .next()
+                .expect("a decomposition should have a single item");
+            let hash = hasher.hash_one(item);
+            let index = usize::try_from(hash).unwrap() % buckets.len();
+
+            buckets[index].insert(hash, delta);
+        });
+
+        buckets
+    }
+
+    fn build_hashes(buckets: &[BTreeMap<u64, GSet<String>>], hasher: &RandomState) -> Vec<u64> {
+        buckets
+            .iter()
+            .map(|bucket| {
+                hasher.hash_one(
+                    bucket
+                        .keys()
+                        .fold(String::new(), |acc, h| format!("{acc}{h}")),
+                )
+            })
+            .collect()
     }
 }
 
@@ -243,126 +287,65 @@ impl<const B: usize> Protocol for Buckets<B> {
             "tracker should be empty and not finished"
         );
 
-        const BUCKET: Vec<(GSet<String>, u64)> = Vec::new();
-
-        let hasher = RandomState::new();
-        let mut local_buckets = [BUCKET; B];
-
         // 1.1. Split the local state and assign each to a bucket. The assignment policy is
         //    implementation defined; here it is used the modulo of the hash value w.r.t. the
         //    number of buckets.
-        self.local.split().into_iter().for_each(|delta| {
-            let hash = hasher.hash_one(
-                delta
-                    .elements()
-                    .iter()
-                    .next()
-                    .expect("a decomposition should have a single item"),
-            );
+        let local_buckets = Buckets::<B>::build_buckets(&self.local, &self.hasher, B);
+        let local_hashes = Buckets::<B>::build_hashes(&local_buckets, &self.hasher);
 
-            let i = usize::try_from(hash).unwrap() % local_buckets.len();
-            local_buckets[i].push((delta, hash));
-        });
-
-        // 1.2. Sort the bucket's elements based on its items hash values, i.e, Merkle trick.
-        local_buckets
-            .iter_mut()
-            .for_each(|bucket| bucket.sort_unstable_by_key(|k| k.1));
-
-        // 1.3. At the local replica, compute the hash of each bucket.
-        let local_hashes = local_buckets.iter().map(|bucket| {
-            hasher.hash_one(
-                bucket
-                    .iter()
-                    .fold(String::new(), |h, k| h + &k.1.to_string()),
-            )
-        });
-
-        // 1.4 Send the bucket hashes to the remote replica.
+        // 1.2 Send the bucket hashes to the remote replica.
         tracker.register(NetworkHop::as_local_to_remote(
             tracker.upload(),
-            std::mem::size_of::<u64>() * B,
+            std::mem::size_of::<u64>() * local_hashes.len(),
         ));
-
-        let mut remote_buckets = [BUCKET; B];
 
         // 2.1. Split the remote state and assign to a bucket. The assignment policy is
         //    implementation defined; here it is used the modulo of the hash value w.r.t. the
         //    number of buckets.
         //    NOTE: The policy must be same across replicas.
-        self.remote.split().into_iter().for_each(|delta| {
-            let hash = hasher.hash_one(
-                delta
-                    .elements()
-                    .iter()
-                    .next()
-                    .expect("a decomposition should have a single item"),
-            );
-
-            let i = usize::try_from(hash).unwrap() % remote_buckets.len();
-            remote_buckets[i].push((delta, hash));
-        });
-
-        // 2.2 Sort the bucket's elements based on its items hash values, i.e, Merkle trick.
-        remote_buckets
-            .iter_mut()
-            .for_each(|bucket| bucket.sort_unstable_by_key(|k| k.1));
+        let remote_buckets = Buckets::<B>::build_buckets(&self.remote, &self.hasher, B);
+        let remote_hashes = Buckets::<B>::build_hashes(&remote_buckets, &self.hasher);
 
         // 2.3. Aggregate the state from the non matching buckets. Or, if the hashes match, ship
         //   back an empty payload to the local replica.
-        let non_matching_buckets: Vec<_> = remote_buckets
-            .iter_mut()
-            .zip(local_hashes)
-            .map(|(bucket, local_hash)| {
-                let remote_hash = hasher.hash_one(
-                    bucket
-                        .iter()
-                        .fold(String::new(), |h, k| h + &k.1.to_string()),
-                );
-
-                if remote_hash == local_hash {
-                    return None;
+        let matchings = zip(local_hashes, remote_hashes).map(|(local, remote)| local == remote);
+        let non_matching_buckets: Vec<_> = zip(remote_buckets, matchings)
+            .map(|(bucket, matching)| {
+                if matching {
+                    None
+                } else {
+                    let mut state = GSet::new();
+                    state.join(Vec::from_iter(bucket.into_values()));
+                    Some(state)
                 }
-
-                let mut state = GSet::new();
-                state.join(bucket.drain(..).map(|k| k.0).collect());
-
-                Some(state)
             })
             .collect();
 
         // 2.4. Send the aggregated bucket state back to the local replica.
         tracker.register(NetworkHop::as_remote_to_local(
             tracker.download(),
-            non_matching_buckets
-                .iter()
-                .flatten()
-                .map(Buckets::<B>::size_of)
-                .sum(),
+            non_matching_buckets.len()
+                + non_matching_buckets
+                    .iter()
+                    .flatten()
+                    .map(Buckets::<B>::size_of)
+                    .sum::<usize>(),
         ));
 
         // 3.1. Compute the state that has been not yet seen by the local replica, and send back to
         //    remote peer the state that he has not seen yet. Only the difference, i.e., the
         //    optimal delta, computed from decompositions, is sent back.
-        let (local_unseen, remote_unseen) = local_buckets
-            .into_iter()
-            .map(|bucket| {
-                let mut state = GSet::new();
-                state.join(bucket.into_iter().map(|k| k.0).collect());
+        let local_buckets = local_buckets.into_iter().map(|bucket| {
+            let mut state = GSet::new();
+            state.join(Vec::from_iter(bucket.into_values()));
+            Some(state)
+        });
 
-                state
-            })
-            .zip(non_matching_buckets)
-            .flat_map(|buckets| match buckets.1 {
-                Some(state) => Some((buckets.0, state)),
-                None => None,
-            })
-            .fold((vec![], vec![]), |mut unseen, buckets| {
-                unseen.0.push(buckets.1.difference(&buckets.0));
-                unseen.1.push(buckets.0.difference(&buckets.1));
-
-                unseen
-            });
+        let (local_unseen, remote_unseen): (Vec<_>, Vec<_>) =
+            zip(local_buckets, non_matching_buckets)
+                .flat_map(|(local_bucket, remote_bucket)| local_bucket.zip(remote_bucket))
+                .map(|(local, remote)| (remote.difference(&local), local.difference(&remote)))
+                .unzip();
 
         // 3.2. Join the buckets received from the remote replica that contain some state.
         self.local.join(local_unseen);
