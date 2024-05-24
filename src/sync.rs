@@ -98,12 +98,21 @@ impl BloomBased {
     #[inline]
     #[must_use]
     pub fn new(local: GSet<String>, remote: GSet<String>) -> Self {
-        Self::with_fpr(local, remote, 0.001) // 0.01 %
+        Self {
+            local,
+            remote,
+            fpr: 0.01 / 100.0, // 0.01%
+        }
     }
 
     #[inline]
     #[must_use]
     pub fn with_fpr(local: GSet<String>, remote: GSet<String>, fpr: f64) -> Self {
+        assert!(
+            (0.0..1.0).contains(&fpr) && fpr != 0.0,
+            "false positive rate should be in the interval [0.0 and 1.0)"
+        );
+
         Self { local, remote, fpr }
     }
 

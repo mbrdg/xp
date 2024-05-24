@@ -23,7 +23,7 @@ where
     pub fn new(capacity: usize, fpr: f64) -> Self {
         assert!(
             (0.0..1.0).contains(&fpr) && fpr != 0.0,
-            "false positive rate should be in the interval (0.0 and 1.0)"
+            "false positive rate should be in the interval [0.0 and 1.0)"
         );
 
         // Compute the optimal bitarray size `m` and the optimal number of hash functions `k`
