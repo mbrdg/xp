@@ -69,13 +69,11 @@ fn main() {
     let start = Instant::now();
 
     let (item_count, item_size, seed) = (100_000, 80, random());
-    println!("{item_count} {item_size} {seed}");
+    let (download, upload) = (32_000, 32_000); // NOTE: These values are in Bytes/s.
+    println!("{item_count} {item_size} {seed} {download} {upload}");
 
     let (similarity, step) = (0..=100, 5);
     println!("{} {} {step}", similarity.start(), similarity.end());
-
-    // NOTE: These values are in Bytes/sec.
-    let (download, upload) = (32_000, 32_000);
 
     for s in similarity.rev().step_by(5) {
         let (local, remote) = populate_replicas(item_count, item_size, s, seed);
@@ -89,14 +87,6 @@ fn main() {
         print_stats("baseline", s, baseline);
 
         // NOTE: The number of buckets should increase accordingly to the set's size.
-        let buckets_2k = {
-            let mut tracker = DefaultTracker::new(download, upload);
-            Buckets::<2_000>::new(local.clone(), remote.clone()).sync(&mut tracker);
-            tracker
-        };
-
-        print_stats("buckets<2k>", s, buckets_2k);
-
         let buckets_5k = {
             let mut tracker = DefaultTracker::new(download, upload);
             Buckets::<5_000>::new(local.clone(), remote.clone()).sync(&mut tracker);
