@@ -19,8 +19,8 @@ pub enum NetworkEvent {
 impl NetworkEvent {
     #[inline]
     #[must_use]
-    pub fn as_local_to_remote(upload: usize, bytes: usize) -> Self {
-        assert!(upload > 0, "bandwidth should be greater than 0");
+    pub fn local_to_remote(upload: usize, bytes: usize) -> Self {
+        assert!(upload > 0, "upload should be greater than 0");
 
         Self::LocalToRemote {
             bytes,
@@ -30,8 +30,8 @@ impl NetworkEvent {
 
     #[inline]
     #[must_use]
-    pub fn as_remote_to_local(download: usize, bytes: usize) -> Self {
-        assert!(download > 0, "bandwidth should be greater than 0");
+    pub fn remote_to_local(download: usize, bytes: usize) -> Self {
+        assert!(download > 0, "download should be greater than 0");
 
         Self::RemoteToLocal {
             bytes,
@@ -39,6 +39,7 @@ impl NetworkEvent {
         }
     }
 
+    #[inline]
     pub fn bytes(&self) -> usize {
         match self {
             Self::LocalToRemote { bytes, duration: _ } => *bytes,
@@ -46,6 +47,7 @@ impl NetworkEvent {
         }
     }
 
+    #[inline]
     pub fn duration(&self) -> Duration {
         match self {
             Self::LocalToRemote { bytes: _, duration } => *duration,
@@ -75,7 +77,7 @@ where
         assert!(upload > 0, "upload should be greater than 0");
 
         Self {
-            events: Vec::with_capacity(4),
+            events: vec![],
             diffs: None,
             download,
             upload,
