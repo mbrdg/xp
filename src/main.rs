@@ -100,7 +100,7 @@ fn main() {
     let start = Instant::now();
 
     let (item_count, item_size, seed) = (100_000, 80, random());
-    let (download, upload) = (NetworkBandwitdth::KiB(32), NetworkBandwitdth::KiB(32));
+    let (download, upload) = (NetworkBandwitdth::MiB(64), NetworkBandwitdth::MiB(64));
     println!(
         "{item_count} {item_size} {seed} {} {}",
         download.bytes_per_sec(),
