@@ -374,3 +374,236 @@ impl Protocol for Buckets {
         replica.elements().iter().map(String::len).sum()
     }
 }
+
+pub struct BloomBuckets {
+    local: GSet<String>,
+    remote: GSet<String>,
+    hasher: RandomState,
+    fpr: f64,
+}
+
+impl BloomBuckets {
+    #[inline]
+    #[must_use]
+    pub fn new(local: GSet<String>, remote: GSet<String>) -> Self {
+        Self {
+            local,
+            remote,
+            hasher: RandomState::new(),
+            fpr: 0.0001 / 100.0, // 1%
+        }
+    }
+}
+
+impl BloomBuckets {
+    fn build_buckets(
+        replica: &GSet<String>,
+        hasher: &RandomState,
+        num_buckets: usize,
+    ) -> Vec<Bucket<GSet<String>>> {
+        let mut buckets = vec![Bucket::new(); num_buckets];
+        replica.split().into_iter().for_each(|delta| {
+            let item = delta
+                .elements()
+                .iter()
+                .next()
+                .expect("a decomposition should have a single item");
+            let hash = hasher.hash_one(item);
+            let index = usize::try_from(hash).unwrap() % buckets.len();
+
+            buckets[index].insert(hash, delta);
+        });
+
+        buckets
+    }
+
+    fn build_hashes(buckets: &[Bucket<GSet<String>>], hasher: &RandomState) -> Vec<u64> {
+        buckets
+            .iter()
+            .map(|bucket| {
+                hasher.hash_one(
+                    bucket
+                        .keys()
+                        .fold(String::new(), |acc, h| format!("{acc}{h}")),
+                )
+            })
+            .collect()
+    }
+
+    fn build_filter(slice: &[GSet<String>], fpr: f64) -> BloomFilter<String> {
+        let mut filter = BloomFilter::new(slice.len(), fpr);
+        slice.iter().for_each(|delta| {
+            let item = delta
+                .elements()
+                .iter()
+                .next()
+                .expect("a decomposition should have a single item");
+            filter.insert(item);
+        });
+
+        filter
+    }
+
+    #[inline]
+    fn size_of_filter(filter: &BloomFilter<String>) -> usize {
+        let len = filter.as_bitslice().len();
+        len / 8 + min(1, len % 8) + 2 * std::mem::size_of::<RandomState>()
+    }
+}
+
+impl Protocol for BloomBuckets {
+    type Replica = GSet<String>;
+    type Tracker = DefaultTracker;
+
+    fn sync(&mut self, tracker: &mut Self::Tracker) {
+        assert!(
+            tracker.events().is_empty() && tracker.diffs().is_none(),
+            "tracker should be empty and not finished"
+        );
+
+        // 1. Build, locally, the AMQ filter from the local splitted decompositions.
+        let local_decompositions = self.local.split();
+        let local_filter = BloomBuckets::build_filter(&local_decompositions, self.fpr);
+
+        // 1.1. Ship the filter to the remote replica.
+        tracker.register(NetworkEvent::local_to_remote(
+            tracker.upload(),
+            BloomBuckets::size_of_filter(&local_filter),
+        ));
+
+        // 2. Remotely, divide decompositions into common, i.e., probably in both replicas and into
+        //    local_unkown, i.e., decompositions that are not definetly at the local replica.
+        let (common, local_unknown): (Vec<_>, Vec<_>) =
+            self.remote.split().into_iter().partition(|delta| {
+                let item = delta
+                    .elements()
+                    .iter()
+                    .next()
+                    .expect("a decomposition should have a single item");
+                local_filter.contains(item)
+            });
+
+        // 2.1. Build a AMQ filter and the corresponding buckets from the common decompositions.
+        let remote_filter = BloomBuckets::build_filter(&common, self.fpr);
+        let remote_buckets = {
+            let mut state = GSet::new();
+            state.join(common);
+            BloomBuckets::build_buckets(&state, &self.hasher, state.len())
+        };
+        let remote_hashes = BloomBuckets::build_hashes(&remote_buckets, &self.hasher);
+
+        // 2.2. Ship the local unknown decompositions, the AMQ filter and the bucket's hashes.
+        tracker.register(NetworkEvent::remote_to_local(
+            tracker.download(),
+            BloomBuckets::size_of_filter(&remote_filter)
+                + std::mem::size_of::<u64>() * remote_hashes.len()
+                + local_unknown
+                    .iter()
+                    .map(BloomBuckets::size_of)
+                    .sum::<usize>(),
+        ));
+
+        // 3. Locally, divide decompositions into common, i.e., probably in both replicas and into
+        //    local_unkown, i.e., decompositions that are not definetly at the remote replica.
+        let (common, remote_unknown): (Vec<_>, Vec<_>) =
+            local_decompositions.into_iter().partition(|delta| {
+                let item = delta
+                    .elements()
+                    .iter()
+                    .next()
+                    .expect("a decomposition should have a single item");
+                remote_filter.contains(item)
+            });
+
+        // 3.1. Build the local buckets from the common decompositions.
+        let local_buckets = {
+            let mut state = GSet::new();
+            state.join(common);
+            BloomBuckets::build_buckets(&state, &self.hasher, remote_hashes.len())
+        };
+        let local_hashes = BloomBuckets::build_hashes(&local_buckets, &self.hasher);
+
+        // 3.2. Determine which buckets do not match with the remote replica.
+        let matchings = zip(local_hashes, remote_hashes).map(|(local, remote)| local == remote);
+        let non_matching_buckets: Vec<_> = zip(local_buckets, matchings)
+            .map(|(bucket, matching)| {
+                (!matching).then(|| {
+                    let mut state = GSet::new();
+                    state.join(Vec::from_iter(bucket.into_values()));
+                    state
+                })
+            })
+            .collect();
+
+        // 3.3. Ship the state that doesn't match to the remote replica.
+        tracker.register(NetworkEvent::local_to_remote(
+            tracker.upload(),
+            non_matching_buckets.len()
+                + non_matching_buckets
+                    .iter()
+                    .flatten()
+                    .map(BloomBuckets::size_of)
+                    .sum::<usize>()
+                + remote_unknown
+                    .iter()
+                    .map(BloomBuckets::size_of)
+                    .sum::<usize>(),
+        ));
+
+        // 4. Compute back the difference from the non matching buckets
+        let remote_buckets = remote_buckets.into_iter().map(|bucket| {
+            let mut state = GSet::new();
+            state.join(Vec::from_iter(bucket.into_values()));
+            Some(state)
+        });
+
+        // These vectors yield the decompositions that were false positives.
+        let (remote_escaped, local_escaped): (Vec<_>, Vec<_>) =
+            zip(non_matching_buckets, remote_buckets)
+                .flat_map(|(local, remote)| remote.zip(local))
+                .map(|(remote, local)| (local.difference(&remote), remote.difference(&local)))
+                .unzip();
+
+        let joinable = Vec::from_iter(remote_unknown.into_iter().chain(remote_escaped));
+        self.remote.join(joinable);
+
+        // 4.1 Ship back the difference from the common decompositions which were false positives
+        //   to the AMQ filters.
+        tracker.register(NetworkEvent::remote_to_local(
+            tracker.download(),
+            local_escaped.iter().map(BloomBuckets::size_of).sum(),
+        ));
+
+        // 5. Merge the collected differences at both replicas.
+        let joinable = Vec::from_iter(local_unknown.into_iter().chain(local_escaped));
+        self.local.join(joinable);
+
+        // 6. Sanity Check.
+        tracker.finish(
+            self.local
+                .elements()
+                .symmetric_difference(self.remote.elements())
+                .count(),
+        );
+
+        if tracker.diffs().is_some_and(|d| d > 0) {
+            for i in self
+                .local
+                .elements()
+                .symmetric_difference(self.remote.elements())
+            {
+                dbg!(
+                    i,
+                    self.local.elements().contains(i),
+                    self.remote.elements().contains(i),
+                    local_filter.contains(i),
+                    remote_filter.contains(i),
+                );
+            }
+        }
+    }
+
+    fn size_of(replica: &Self::Replica) -> usize {
+        replica.elements().iter().map(String::len).sum()
+    }
+}
