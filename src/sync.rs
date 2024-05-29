@@ -17,7 +17,6 @@ pub trait Protocol {
 
     fn sync(&mut self, tracker: &mut Self::Tracker);
     fn size_of(replica: &Self::Replica) -> usize;
-    fn is_synced(&self) -> bool;
 }
 
 pub struct Baseline {
@@ -74,17 +73,10 @@ impl Protocol for Baseline {
                 .symmetric_difference(self.remote.elements())
                 .count(),
         );
-
-        // NOTE: This algorithm guarantees that replicas sync given that no operations occur.
-        assert!(self.is_synced());
     }
 
     fn size_of(replica: &Self::Replica) -> usize {
         replica.elements().iter().map(String::len).sum()
-    }
-
-    fn is_synced(&self) -> bool {
-        self.local == self.remote
     }
 }
 
@@ -373,16 +365,9 @@ impl<const B: usize> Protocol for Buckets<B> {
                 .symmetric_difference(self.remote.elements())
                 .count(),
         );
-
-        // NOTE: This algorithm guarantees that replicas sync given that no operations occur.
-        assert!(self.is_synced());
     }
 
     fn size_of(replica: &Self::Replica) -> usize {
         replica.elements().iter().map(String::len).sum()
-    }
-
-    fn is_synced(&self) -> bool {
-        self.local == self.remote
     }
 }

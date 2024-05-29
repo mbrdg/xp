@@ -8,6 +8,7 @@ pub trait Tracker {
     fn events(&self) -> &Vec<Self::Event>;
     fn finish(&mut self, diffs: usize);
     fn diffs(&self) -> Option<usize>;
+    fn is_synced(&self) -> bool;
 }
 
 #[derive(Debug)]
@@ -119,5 +120,9 @@ where
 
     fn diffs(&self) -> Option<usize> {
         self.diffs
+    }
+
+    fn is_synced(&self) -> bool {
+        self.diffs.is_some_and(|d| d == 0)
     }
 }
