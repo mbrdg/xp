@@ -1,6 +1,9 @@
 #![allow(dead_code)]
 
-use std::time::{Duration, Instant};
+use std::{
+    any,
+    time::{Duration, Instant},
+};
 
 use crate::{
     crdt::GSet,
@@ -20,7 +23,7 @@ mod crdt;
 mod sync;
 mod tracker;
 
-fn populate_replicas(
+fn populate(
     count: usize,
     size: usize,
     similarity: usize,
@@ -29,95 +32,101 @@ fn populate_replicas(
     let similar_items = (count as f64 * (similarity as f64 / 100.0)) as usize;
     let diff_items = count - similar_items;
 
-    let (mut l, mut r) = (GSet::new(), GSet::new());
     let mut rng = StdRng::seed_from_u64(seed);
+
+    let mut local = GSet::new();
+    let mut remote = GSet::new();
 
     for _ in 0..similar_items {
         let item = Alphanumeric.sample_string(&mut rng, size);
-        l.insert(item.clone());
-        r.insert(item);
+        local.insert(item.clone());
+        remote.insert(item);
     }
 
     for _ in 0..diff_items {
         let item = Alphanumeric.sample_string(&mut rng, size);
-        l.insert(item);
+        local.insert(item);
 
         let item = Alphanumeric.sample_string(&mut rng, size);
-        r.insert(item);
+        remote.insert(item);
     }
 
     assert_eq!(
-        l.elements().symmetric_difference(r.elements()).count(),
+        local
+            .elements()
+            .symmetric_difference(remote.elements())
+            .count(),
         2 * diff_items
     );
 
-    (l, r)
+    (local, remote)
 }
 
-fn print_stats(protocol: &str, similarity: usize, tracker: DefaultTracker) {
+/// Runs the specified protocol and outputs the metrics obtained.
+/// NOTE: The values for download and upload are expressed in Bytes/s.
+fn run<P>(protocol: &mut P, id: Option<&str>, similarity: usize, download: usize, upload: usize)
+where
+    P: Protocol<Tracker = DefaultTracker<NetworkEvent>>,
+{
+    let mut tracker = DefaultTracker::new(download, upload);
+    protocol.sync(&mut tracker);
+
+    let type_name = {
+        let name = any::type_name_of_val(&protocol).split("::").last().unwrap();
+        match id {
+            Some(id) => format!("{name}<{id}>"),
+            None => name.to_string(),
+        }
+    };
+
+    if !tracker.is_synced() {
+        eprintln!(
+            "{type_name} not totally synced with {} diffs",
+            tracker.diffs().unwrap()
+        );
+    }
+
     let hops = tracker.events().len();
     let duration: Duration = tracker.events().iter().map(NetworkEvent::duration).sum();
     let bytes: usize = tracker.events().iter().map(NetworkEvent::bytes).sum();
 
     println!(
-        "{protocol} {similarity} {hops} {:.3} {bytes}",
+        "{type_name} {similarity} {hops} {:.3} {bytes}",
         duration.as_secs_f64()
-    )
+    );
 }
 
 fn main() {
     let start = Instant::now();
 
     let (item_count, item_size, seed) = (100_000, 80, random());
-    let (download, upload) = (32_000, 32_000); // NOTE: These values are in Bytes/s.
+    let (download, upload) = (32_000, 32_000);
     println!("{item_count} {item_size} {seed} {download} {upload}");
 
     let (similarity, step) = (0..=100, 5);
     println!("{} {} {step}", similarity.start(), similarity.end());
 
-    for s in similarity.rev().step_by(5) {
-        let (local, remote) = populate_replicas(item_count, item_size, s, seed);
+    for similarity_factor in similarity.rev().step_by(5) {
+        let (local, remote) = populate(item_count, item_size, similarity_factor, seed);
 
-        let baseline = {
-            let mut tracker = DefaultTracker::new(download, upload);
-            Baseline::new(local.clone(), remote.clone()).sync(&mut tracker);
-            tracker
-        };
+        run(
+            &mut Baseline::new(local.clone(), remote.clone()),
+            None,
+            similarity_factor,
+            download,
+            upload,
+        );
 
-        print_stats("baseline", s, baseline);
-
-        // NOTE: The number of buckets should increase accordingly to the set's size.
-        let buckets_5k = {
-            let mut tracker = DefaultTracker::new(download, upload);
-            Buckets::<5_000>::new(local.clone(), remote.clone()).sync(&mut tracker);
-            tracker
-        };
-
-        print_stats("buckets<5k>", s, buckets_5k);
-
-        let buckets_10k = {
-            let mut tracker = DefaultTracker::new(download, upload);
-            Buckets::<10_000>::new(local.clone(), remote.clone()).sync(&mut tracker);
-            tracker
-        };
-
-        print_stats("buckets<10k>", s, buckets_10k);
-
-        let buckets_20k = {
-            let mut tracker = DefaultTracker::new(download, upload);
-            Buckets::<20_000>::new(local.clone(), remote.clone()).sync(&mut tracker);
-            tracker
-        };
-
-        print_stats("buckets<20k>", s, buckets_20k);
-
-        let buckets_50k = {
-            let mut tracker = DefaultTracker::new(download, upload);
-            Buckets::<50_000>::new(local.clone(), remote.clone()).sync(&mut tracker);
-            tracker
-        };
-
-        print_stats("buckets<50k>", s, buckets_50k);
+        let load_factors = [1.0, 1.25];
+        for load_factor in load_factors {
+            run(
+                &mut Buckets::with_load_factor(local.clone(), remote.clone(), load_factor),
+                Some(&load_factor.to_string()),
+                similarity_factor,
+                download,
+                upload,
+            );
+        }
     }
 
     eprintln!("time elapsed {:.3?}", start.elapsed());
