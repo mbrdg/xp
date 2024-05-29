@@ -217,36 +217,50 @@ impl Protocol for BloomBased {
     fn size_of(replica: &Self::Replica) -> usize {
         replica.elements().iter().map(String::len).sum()
     }
-
-    fn is_synced(&self) -> bool {
-        self.local == self.remote
-    }
 }
 
 type Bucket<T> = BTreeMap<u64, T>;
-pub struct Buckets<const B: usize> {
+pub struct Buckets {
     local: GSet<String>,
     remote: GSet<String>,
     hasher: RandomState,
+    b: usize,
 }
 
-impl<const B: usize> Buckets<B> {
+impl Buckets {
     #[inline]
     #[must_use]
     pub fn new(local: GSet<String>, remote: GSet<String>) -> Self {
+        let b = (local.len() as f64 * 1.0) as usize;
+
         Self {
             local,
             remote,
             hasher: RandomState::new(),
+            b,
+        }
+    }
+
+    #[inline]
+    #[must_use]
+    pub fn with_load_factor(local: GSet<String>, remote: GSet<String>, load_factor: f64) -> Self {
+        assert!(load_factor >= 0.0, "load factor should be greater than 0.0");
+        let b = (local.len() as f64 * load_factor) as usize;
+
+        Self {
+            local,
+            remote,
+            hasher: RandomState::new(),
+            b,
         }
     }
 
     fn build_buckets(
         replica: &GSet<String>,
         hasher: &RandomState,
-        len: usize,
+        b: usize,
     ) -> Vec<Bucket<GSet<String>>> {
-        let mut buckets = vec![BTreeMap::new(); len];
+        let mut buckets = vec![Bucket::new(); b];
 
         replica.split().into_iter().for_each(|delta| {
             let item = delta
@@ -263,7 +277,7 @@ impl<const B: usize> Buckets<B> {
         buckets
     }
 
-    fn build_hashes(buckets: &[BTreeMap<u64, GSet<String>>], hasher: &RandomState) -> Vec<u64> {
+    fn build_hashes(buckets: &[Bucket<GSet<String>>], hasher: &RandomState) -> Vec<u64> {
         buckets
             .iter()
             .map(|bucket| {
@@ -277,7 +291,7 @@ impl<const B: usize> Buckets<B> {
     }
 }
 
-impl<const B: usize> Protocol for Buckets<B> {
+impl Protocol for Buckets {
     type Replica = GSet<String>;
     type Tracker = DefaultTracker;
 
@@ -290,8 +304,8 @@ impl<const B: usize> Protocol for Buckets<B> {
         // 1.1. Split the local state and assign each to a bucket. The assignment policy is
         //    implementation defined; here it is used the modulo of the hash value w.r.t. the
         //    number of buckets.
-        let local_buckets = Buckets::<B>::build_buckets(&self.local, &self.hasher, B);
-        let local_hashes = Buckets::<B>::build_hashes(&local_buckets, &self.hasher);
+        let local_buckets = Buckets::build_buckets(&self.local, &self.hasher, self.b);
+        let local_hashes = Buckets::build_hashes(&local_buckets, &self.hasher);
 
         // 1.2 Send the bucket hashes to the remote replica.
         tracker.register(NetworkEvent::local_to_remote(
@@ -303,21 +317,19 @@ impl<const B: usize> Protocol for Buckets<B> {
         //    implementation defined; here it is used the modulo of the hash value w.r.t. the
         //    number of buckets.
         //    NOTE: The policy must be same across replicas.
-        let remote_buckets = Buckets::<B>::build_buckets(&self.remote, &self.hasher, B);
-        let remote_hashes = Buckets::<B>::build_hashes(&remote_buckets, &self.hasher);
+        let remote_buckets = Buckets::build_buckets(&self.remote, &self.hasher, self.b);
+        let remote_hashes = Buckets::build_hashes(&remote_buckets, &self.hasher);
 
         // 2.3. Aggregate the state from the non matching buckets. Or, if the hashes match, ship
         //   back an empty payload to the local replica.
         let matchings = zip(local_hashes, remote_hashes).map(|(local, remote)| local == remote);
         let non_matching_buckets: Vec<_> = zip(remote_buckets, matchings)
             .map(|(bucket, matching)| {
-                if matching {
-                    None
-                } else {
+                (!matching).then(|| {
                     let mut state = GSet::new();
                     state.join(Vec::from_iter(bucket.into_values()));
-                    Some(state)
-                }
+                    state
+                })
             })
             .collect();
 
@@ -328,7 +340,7 @@ impl<const B: usize> Protocol for Buckets<B> {
                 + non_matching_buckets
                     .iter()
                     .flatten()
-                    .map(Buckets::<B>::size_of)
+                    .map(Buckets::size_of)
                     .sum::<usize>(),
         ));
 
@@ -352,7 +364,7 @@ impl<const B: usize> Protocol for Buckets<B> {
 
         tracker.register(NetworkEvent::local_to_remote(
             tracker.upload(),
-            remote_unseen.iter().map(Buckets::<B>::size_of).sum(),
+            remote_unseen.iter().map(Buckets::size_of).sum(),
         ));
 
         // 4.1. Join the optimal deltas received from the local replica.
