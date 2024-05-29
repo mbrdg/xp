@@ -12,6 +12,26 @@ pub trait Tracker {
 }
 
 #[derive(Debug)]
+pub enum NetworkBandwitdth {
+    KBits(usize),
+    MBits(usize),
+    GBits(usize),
+    TBits(usize),
+}
+
+impl NetworkBandwitdth {
+    #[inline]
+    pub fn bytes_per_sec(&self) -> usize {
+        match self {
+            NetworkBandwitdth::KBits(b) => 125 * b,
+            NetworkBandwitdth::MBits(b) => 125_000 * b,
+            NetworkBandwitdth::GBits(b) => 125_000_000 * b,
+            NetworkBandwitdth::TBits(b) => 125_000_000 * b,
+        }
+    }
+}
+
+#[derive(Debug)]
 pub enum NetworkEvent {
     LocalToRemote { bytes: usize, duration: Duration },
     RemoteToLocal { bytes: usize, duration: Duration },

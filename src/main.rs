@@ -7,8 +7,8 @@ use std::{
 
 use crate::{
     crdt::GSet,
-    sync::{Baseline, Buckets, Protocol},
-    tracker::NetworkEvent,
+    sync::{Baseline, BloomBuckets, Buckets, Protocol},
+    tracker::{NetworkBandwitdth, NetworkEvent},
 };
 use rand::{
     distributions::{Alphanumeric, DistString},
@@ -100,8 +100,12 @@ fn main() {
     let start = Instant::now();
 
     let (item_count, item_size, seed) = (100_000, 80, random());
-    let (download, upload) = (32_000, 32_000);
-    println!("{item_count} {item_size} {seed} {download} {upload}");
+    let (download, upload) = (NetworkBandwitdth::KBits(32), NetworkBandwitdth::KBits(32));
+    println!(
+        "{item_count} {item_size} {seed} {} {}",
+        download.bytes_per_sec(),
+        upload.bytes_per_sec()
+    );
 
     let (similarity, step) = (0..=100, 5);
     println!("{} {} {step}", similarity.start(), similarity.end());
@@ -113,8 +117,8 @@ fn main() {
             &mut Baseline::new(local.clone(), remote.clone()),
             None,
             similarity_factor,
-            download,
-            upload,
+            download.bytes_per_sec(),
+            upload.bytes_per_sec(),
         );
 
         let load_factors = [1.0, 1.25];
@@ -123,10 +127,18 @@ fn main() {
                 &mut Buckets::with_load_factor(local.clone(), remote.clone(), load_factor),
                 Some(&load_factor.to_string()),
                 similarity_factor,
-                download,
-                upload,
+                download.bytes_per_sec(),
+                upload.bytes_per_sec(),
             );
         }
+
+        run(
+            &mut BloomBuckets::new(local.clone(), remote.clone()),
+            None,
+            similarity_factor,
+            download.bytes_per_sec(),
+            upload.bytes_per_sec(),
+        );
     }
 
     eprintln!("time elapsed {:.3?}", start.elapsed());
