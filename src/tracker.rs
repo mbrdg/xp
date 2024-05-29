@@ -13,20 +13,20 @@ pub trait Tracker {
 
 #[derive(Debug)]
 pub enum NetworkBandwitdth {
-    KBits(usize),
-    MBits(usize),
-    GBits(usize),
-    TBits(usize),
+    KiB(usize),
+    MiB(usize),
+    GiB(usize),
+    TiB(usize),
 }
 
 impl NetworkBandwitdth {
     #[inline]
     pub fn bytes_per_sec(&self) -> usize {
         match self {
-            NetworkBandwitdth::KBits(b) => 125 * b,
-            NetworkBandwitdth::MBits(b) => 125_000 * b,
-            NetworkBandwitdth::GBits(b) => 125_000_000 * b,
-            NetworkBandwitdth::TBits(b) => 125_000_000 * b,
+            NetworkBandwitdth::KiB(b) => 125 * b,
+            NetworkBandwitdth::MiB(b) => 125_000 * b,
+            NetworkBandwitdth::GiB(b) => 125_000_000 * b,
+            NetworkBandwitdth::TiB(b) => 125_000_000 * b,
         }
     }
 }
