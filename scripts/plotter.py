@@ -90,10 +90,10 @@ def main() -> None:
         hops[proto].append(int(run_params[2]))
 
     for proto, b in exchanged_bytes.items():
-        ax[0].plot(dissimilarity, b, "o:", label=proto)
+        ax[0].plot(dissimilarity, b, marker="o", label=proto)
 
     for proto, d in durations.items():
-        ax[1].plot(dissimilarity, d, "o:", label=proto)
+        ax[1].plot(dissimilarity, d, marker="o", label=proto)
 
     for proto, h in hops.items():
         print(f"{proto} avg. {np.mean(h)} hops")
