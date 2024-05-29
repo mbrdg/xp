@@ -80,13 +80,13 @@ impl Protocol for Baseline {
     }
 }
 
-pub struct BloomBased {
+pub struct Bloom {
     local: GSet<String>,
     remote: GSet<String>,
     fpr: f64,
 }
 
-impl BloomBased {
+impl Bloom {
     #[inline]
     #[must_use]
     pub fn new(local: GSet<String>, remote: GSet<String>) -> Self {
@@ -110,14 +110,26 @@ impl BloomBased {
 
     #[inline]
     fn size_of_filter(filter: &BloomFilter<String>) -> usize {
-        // TODO: assume a language agnostic attitude by remove the idiosyncrasies of rust, namely,
-        // `RandomState` to ensure that the replicas hash deterministically.
         let len = filter.as_bitslice().len();
         len / 8 + min(1, len % 8) + 2 * std::mem::size_of::<RandomState>()
     }
+
+    fn build_filter(slice: &[GSet<String>], fpr: f64) -> BloomFilter<String> {
+        let mut filter = BloomFilter::new(slice.len(), fpr);
+        slice.iter().for_each(|delta| {
+            let item = delta
+                .elements()
+                .iter()
+                .next()
+                .expect("a decomposition should have a single item");
+            filter.insert(item);
+        });
+
+        filter
+    }
 }
 
-impl Protocol for BloomBased {
+impl Protocol for Bloom {
     type Replica = GSet<String>;
     type Tracker = DefaultTracker;
 
@@ -129,21 +141,12 @@ impl Protocol for BloomBased {
 
         // 1.1. Split the local state and insert each decomposition into a Bloom Filter.
         let local_split = self.local.split();
-        let mut local_filter = BloomFilter::new(local_split.len(), self.fpr);
-
-        local_split.iter().for_each(|delta| {
-            let item = delta
-                .elements()
-                .iter()
-                .next()
-                .expect("a decomposition should have a single element");
-            local_filter.insert(item);
-        });
+        let local_filter = Bloom::build_filter(&local_split, self.fpr);
 
         // 1.2. Ship the Bloom filter to the remote replica.
         tracker.register(NetworkEvent::local_to_remote(
             tracker.upload(),
-            BloomBased::size_of_filter(&local_filter),
+            Bloom::size_of_filter(&local_filter),
         ));
 
         // 2.1. At the remote replica, split the state into join decompositions. Then split the
@@ -160,21 +163,13 @@ impl Protocol for BloomBased {
             });
 
         // 2.2. From the common partions build a Bloom Filter.
-        let mut remote_filter = BloomFilter::new(common.len(), self.fpr);
-        common.into_iter().for_each(|delta| {
-            let item = delta
-                .elements()
-                .iter()
-                .next()
-                .expect("a decomposition should have a single item");
-            remote_filter.insert(item);
-        });
+        let remote_filter = Bloom::build_filter(common.as_slice(), self.fpr);
 
         // 2.3. Send back to the remote replica the unknown decompositions and the Bloom Filter.
         tracker.register(NetworkEvent::remote_to_local(
             tracker.download(),
-            BloomBased::size_of_filter(&remote_filter)
-                + local_unkown.iter().map(BloomBased::size_of).sum::<usize>(),
+            Bloom::size_of_filter(&remote_filter)
+                + local_unkown.iter().map(Bloom::size_of).sum::<usize>(),
         ));
 
         // 3.1. At the local replica, split the state into join decompositions. Then split the
@@ -182,15 +177,15 @@ impl Protocol for BloomBased {
         //   locally but not remotely.
         let remote_unknown: Vec<_> = local_split
             .into_iter()
-            .partition(|delta| {
+            .filter(|delta| {
                 let item = delta
                     .elements()
                     .iter()
                     .next()
                     .expect("a decomposition should have a single item");
-                remote_filter.contains(item)
+                !remote_filter.contains(item)
             })
-            .1;
+            .collect();
 
         // 3.2. Join the incoming local unknown decompositons.
         self.local.join(local_unkown);
@@ -198,14 +193,14 @@ impl Protocol for BloomBased {
         // 3.3. Send to the remote replica the unkown decompositions.
         tracker.register(NetworkEvent::local_to_remote(
             tracker.upload(),
-            remote_unknown.iter().map(BloomBased::size_of).sum(),
+            remote_unknown.iter().map(Bloom::size_of).sum(),
         ));
 
         // 4. Join the incoming remote unkown decompositions.
         self.remote.join(remote_unknown);
 
         // 5. Sanity check.
-        // NOTE: This algorithm does not guarantee full state sync between replicas.
+        // WARN: This algorithm does not guarantee full state sync between replicas.
         tracker.finish(
             self.local
                 .elements()
@@ -231,13 +226,11 @@ impl Buckets {
     #[inline]
     #[must_use]
     pub fn new(local: GSet<String>, remote: GSet<String>) -> Self {
-        let b = (local.len() as f64 * 1.0) as usize;
-
         Self {
+            b: local.len(),
             local,
             remote,
             hasher: RandomState::new(),
-            b,
         }
     }
 
@@ -245,23 +238,21 @@ impl Buckets {
     #[must_use]
     pub fn with_load_factor(local: GSet<String>, remote: GSet<String>, load_factor: f64) -> Self {
         assert!(load_factor >= 0.0, "load factor should be greater than 0.0");
-        let b = (local.len() as f64 * load_factor) as usize;
 
         Self {
+            b: (local.len() as f64 * load_factor) as usize,
             local,
             remote,
             hasher: RandomState::new(),
-            b,
         }
     }
 
     fn build_buckets(
         replica: &GSet<String>,
         hasher: &RandomState,
-        b: usize,
+        num_buckets: usize,
     ) -> Vec<Bucket<GSet<String>>> {
-        let mut buckets = vec![Bucket::new(); b];
-
+        let mut buckets = vec![Bucket::new(); num_buckets];
         replica.split().into_iter().for_each(|delta| {
             let item = delta
                 .elements()
