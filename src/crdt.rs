@@ -102,17 +102,6 @@ where
 
 impl<T> Eq for GSet<T> where T: Eq + Hash {}
 
-impl<T> FromIterator<T> for GSet<T>
-where
-    T: Eq + Hash,
-{
-    fn from_iter<I: IntoIterator<Item = T>>(iter: I) -> Self {
-        Self {
-            base: HashSet::from_iter(iter),
-        }
-    }
-}
-
 #[cfg(test)]
 mod gset {
     use super::*;
