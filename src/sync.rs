@@ -214,7 +214,20 @@ impl Protocol for Bloom {
     }
 }
 
-type Bucket<T> = BTreeMap<u64, T>;
+pub trait BucketBuilder {
+    type Bucket;
+    type Replica: Decomposable;
+    type Hasher: BuildHasher;
+
+    fn build_buckets(
+        replica: &Self::Replica,
+        hasher: &Self::Hasher,
+        num_buckets: usize,
+    ) -> Vec<Self::Bucket>;
+
+    fn build_hashes(buckets: &[Self::Bucket], hasher: &Self::Hasher) -> Vec<u64>;
+}
+
 pub struct Buckets {
     local: GSet<String>,
     remote: GSet<String>,
@@ -246,13 +259,19 @@ impl Buckets {
             hasher: RandomState::new(),
         }
     }
+}
+
+impl BucketBuilder for Buckets {
+    type Bucket = BTreeMap<u64, Self::Replica>;
+    type Replica = GSet<String>;
+    type Hasher = RandomState;
 
     fn build_buckets(
-        replica: &GSet<String>,
-        hasher: &RandomState,
+        replica: &Self::Replica,
+        hasher: &Self::Hasher,
         num_buckets: usize,
-    ) -> Vec<Bucket<GSet<String>>> {
-        let mut buckets = vec![Bucket::new(); num_buckets];
+    ) -> Vec<Self::Bucket> {
+        let mut buckets = vec![Self::Bucket::new(); num_buckets];
         replica.split().into_iter().for_each(|delta| {
             let item = delta
                 .elements()
@@ -260,23 +279,22 @@ impl Buckets {
                 .next()
                 .expect("a decomposition should have a single item");
             let hash = hasher.hash_one(item);
-            let index = usize::try_from(hash).unwrap() % buckets.len();
+            let idx = usize::try_from(hash).unwrap() % buckets.len();
 
-            buckets[index].insert(hash, delta);
+            buckets[idx].insert(hash, delta);
         });
 
         buckets
     }
 
-    fn build_hashes(buckets: &[Bucket<GSet<String>>], hasher: &RandomState) -> Vec<u64> {
+    fn build_hashes(buckets: &[Self::Bucket], hasher: &Self::Hasher) -> Vec<u64> {
         buckets
             .iter()
             .map(|bucket| {
-                hasher.hash_one(
-                    bucket
-                        .keys()
-                        .fold(String::new(), |acc, h| format!("{acc}{h}")),
-                )
+                let fingerprint = bucket
+                    .keys()
+                    .fold(String::new(), |acc, f| format!("{acc}{f}"));
+                hasher.hash_one(fingerprint)
             })
             .collect()
     }
@@ -346,7 +364,7 @@ impl Protocol for Buckets {
 
         let (local_unseen, remote_unseen): (Vec<_>, Vec<_>) =
             zip(local_buckets, non_matching_buckets)
-                .flat_map(|(local_bucket, remote_bucket)| local_bucket.zip(remote_bucket))
+                .flat_map(|(local, remote)| local.zip(remote))
                 .map(|(local, remote)| (remote.difference(&local), local.difference(&remote)))
                 .unzip();
 
@@ -390,46 +408,12 @@ impl BloomBuckets {
             local,
             remote,
             hasher: RandomState::new(),
-            fpr: 0.0001 / 100.0, // 1%
+            fpr: 1.0 / 100.0, // 1%
         }
     }
 }
 
 impl BloomBuckets {
-    fn build_buckets(
-        replica: &GSet<String>,
-        hasher: &RandomState,
-        num_buckets: usize,
-    ) -> Vec<Bucket<GSet<String>>> {
-        let mut buckets = vec![Bucket::new(); num_buckets];
-        replica.split().into_iter().for_each(|delta| {
-            let item = delta
-                .elements()
-                .iter()
-                .next()
-                .expect("a decomposition should have a single item");
-            let hash = hasher.hash_one(item);
-            let index = usize::try_from(hash).unwrap() % buckets.len();
-
-            buckets[index].insert(hash, delta);
-        });
-
-        buckets
-    }
-
-    fn build_hashes(buckets: &[Bucket<GSet<String>>], hasher: &RandomState) -> Vec<u64> {
-        buckets
-            .iter()
-            .map(|bucket| {
-                hasher.hash_one(
-                    bucket
-                        .keys()
-                        .fold(String::new(), |acc, h| format!("{acc}{h}")),
-                )
-            })
-            .collect()
-    }
-
     fn build_filter(slice: &[GSet<String>], fpr: f64) -> BloomFilter<String> {
         let mut filter = BloomFilter::new(slice.len(), fpr);
         slice.iter().for_each(|delta| {
@@ -448,6 +432,45 @@ impl BloomBuckets {
     fn size_of_filter(filter: &BloomFilter<String>) -> usize {
         let len = filter.as_bitslice().len();
         len / 8 + min(1, len % 8) + 2 * std::mem::size_of::<RandomState>()
+    }
+}
+
+impl BucketBuilder for BloomBuckets {
+    type Bucket = BTreeMap<u64, Self::Replica>;
+    type Replica = GSet<String>;
+    type Hasher = RandomState;
+
+    fn build_buckets(
+        replica: &Self::Replica,
+        hasher: &Self::Hasher,
+        num_buckets: usize,
+    ) -> Vec<Self::Bucket> {
+        let mut buckets = vec![Self::Bucket::new(); num_buckets];
+        replica.split().into_iter().for_each(|delta| {
+            let item = delta
+                .elements()
+                .iter()
+                .next()
+                .expect("a decomposition should have a single item");
+            let hash = hasher.hash_one(item);
+            let idx = usize::try_from(hash).unwrap() % buckets.len();
+
+            buckets[idx].insert(hash, delta);
+        });
+
+        buckets
+    }
+
+    fn build_hashes(buckets: &[Self::Bucket], hasher: &Self::Hasher) -> Vec<u64> {
+        buckets
+            .iter()
+            .map(|bucket| {
+                let fingerprint = bucket
+                    .keys()
+                    .fold(String::new(), |acc, f| format!("{acc}{f}"));
+                hasher.hash_one(fingerprint)
+            })
+            .collect()
     }
 }
 
