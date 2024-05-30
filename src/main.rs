@@ -64,8 +64,13 @@ fn populate(
 
 /// Runs the specified protocol and outputs the metrics obtained.
 /// NOTE: The values for download and upload are expressed in Bytes/s.
-fn run<P>(protocol: &mut P, id: Option<&str>, similarity: usize, download: usize, upload: usize)
-where
+fn run<P>(
+    protocol: &mut P,
+    id: Option<&str>,
+    similarity: usize,
+    download: NetworkBandwitdth,
+    upload: NetworkBandwitdth,
+) where
     P: Protocol<Tracker = DefaultTracker<NetworkEvent>>,
 {
     let mut tracker = DefaultTracker::new(download, upload);
@@ -100,11 +105,11 @@ fn main() {
     let start = Instant::now();
 
     let (item_count, item_size, seed) = (100_000, 80, random());
-    let (download, upload) = (NetworkBandwitdth::MiB(64), NetworkBandwitdth::MiB(64));
+    let (download, upload) = (NetworkBandwitdth::Mbps(10.0), NetworkBandwitdth::Mbps(10.0));
     println!(
         "{item_count} {item_size} {seed} {} {}",
-        download.bytes_per_sec(),
-        upload.bytes_per_sec()
+        download.as_bytes_per_sec() as usize,
+        upload.as_bytes_per_sec() as usize,
     );
 
     let (similarity, step) = (0..=100, 5);
@@ -117,8 +122,8 @@ fn main() {
             &mut Baseline::new(local.clone(), remote.clone()),
             None,
             similarity_factor,
-            download.bytes_per_sec(),
-            upload.bytes_per_sec(),
+            download,
+            upload,
         );
 
         let load_factors = [1.0, 1.25];
@@ -127,8 +132,8 @@ fn main() {
                 &mut Buckets::with_load_factor(local.clone(), remote.clone(), load_factor),
                 Some(&load_factor.to_string()),
                 similarity_factor,
-                download.bytes_per_sec(),
-                upload.bytes_per_sec(),
+                download,
+                upload,
             );
         }
 
@@ -136,8 +141,8 @@ fn main() {
             &mut BloomBuckets::new(local.clone(), remote.clone()),
             None,
             similarity_factor,
-            download.bytes_per_sec(),
-            upload.bytes_per_sec(),
+            download,
+            upload,
         );
     }
 
