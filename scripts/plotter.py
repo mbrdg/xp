@@ -5,6 +5,7 @@ import argparse
 from collections import defaultdict, namedtuple
 from cycler import cycler
 import fileinput
+from pathlib import Path
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib import ticker
@@ -102,7 +103,11 @@ def main() -> None:
     ax[0].legend(loc="lower right", fontsize="small")
     ax[1].legend(loc="lower right", fontsize="small")
 
-    plt.show()
+    # Save the file to an appropriate folder
+    plots = Path("plots/")
+    plots.mkdir(parents=True, exist_ok=True)
+
+    plt.savefig(plots / "xp.pdf", dpi=600)
 
 
 if __name__ == "__main__":
