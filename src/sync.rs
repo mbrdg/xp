@@ -608,22 +608,6 @@ impl Protocol for BloomBuckets {
                 .symmetric_difference(self.remote.elements())
                 .count(),
         );
-
-        if tracker.diffs().is_some_and(|d| d > 0) {
-            for i in self
-                .local
-                .elements()
-                .symmetric_difference(self.remote.elements())
-            {
-                dbg!(
-                    i,
-                    self.local.elements().contains(i),
-                    self.remote.elements().contains(i),
-                    local_filter.contains(i),
-                    remote_filter.contains(i),
-                );
-            }
-        }
     }
 
     fn size_of(replica: &Self::Replica) -> usize {
