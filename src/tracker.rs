@@ -4,11 +4,11 @@ pub trait Event {}
 pub trait Tracker {
     type Event: Event;
 
+    fn is_ready(&self) -> bool;
     fn register(&mut self, event: Self::Event);
     fn events(&self) -> &Vec<Self::Event>;
     fn finish(&mut self, diffs: usize);
-    fn diffs(&self) -> Option<usize>;
-    fn is_synced(&self) -> bool;
+    fn diffs(&self) -> usize;
 }
 
 /// Network Bandwidth value in bits per second.
@@ -141,6 +141,10 @@ where
 {
     type Event = E;
 
+    fn is_ready(&self) -> bool {
+        self.events.is_empty() && self.diffs.is_none()
+    }
+
     fn register(&mut self, event: Self::Event) {
         if self.diffs.is_none() {
             self.events.push(event);
@@ -157,11 +161,8 @@ where
         }
     }
 
-    fn diffs(&self) -> Option<usize> {
+    fn diffs(&self) -> usize {
         self.diffs
-    }
-
-    fn is_synced(&self) -> bool {
-        self.diffs.is_some_and(|d| d == 0)
+            .expect("`finish()` should be called before `diffs()`")
     }
 }

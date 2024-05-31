@@ -84,10 +84,10 @@ fn run<P>(
         }
     };
 
-    if !tracker.is_synced() {
+    if tracker.diffs() > 0 {
         eprintln!(
             "{type_name} not totally synced with {} diffs",
-            tracker.diffs().unwrap()
+            tracker.diffs()
         );
     }
 

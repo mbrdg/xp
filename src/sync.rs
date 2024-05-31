@@ -37,10 +37,7 @@ impl Protocol for Baseline {
     type Tracker = DefaultTracker;
 
     fn sync(&mut self, tracker: &mut Self::Tracker) {
-        assert!(
-            tracker.events().is_empty() && tracker.diffs().is_none(),
-            "tracker should be empty and not finished"
-        );
+        assert!(tracker.is_ready(), "tracker should be ready");
 
         // 1. Ship the full local state and send it the remote replica.
         let local_state = self.local.clone();
@@ -134,10 +131,7 @@ impl Protocol for Bloom {
     type Tracker = DefaultTracker;
 
     fn sync(&mut self, tracker: &mut Self::Tracker) {
-        assert!(
-            tracker.events().is_empty() && tracker.diffs().is_none(),
-            "tracker should be empty and not finished"
-        );
+        assert!(tracker.is_ready(), "tracker should be ready");
 
         // 1.1. Split the local state and insert each decomposition into a Bloom Filter.
         let local_split = self.local.split();
@@ -305,10 +299,7 @@ impl Protocol for Buckets {
     type Tracker = DefaultTracker;
 
     fn sync(&mut self, tracker: &mut Self::Tracker) {
-        assert!(
-            tracker.events().is_empty() && tracker.diffs().is_none(),
-            "tracker should be empty and not finished"
-        );
+        assert!(tracker.is_ready(), "tracker should be ready");
 
         // 1.1. Split the local state and assign each to a bucket. The assignment policy is
         //    implementation defined; here it is used the modulo of the hash value w.r.t. the
@@ -479,10 +470,7 @@ impl Protocol for BloomBuckets {
     type Tracker = DefaultTracker;
 
     fn sync(&mut self, tracker: &mut Self::Tracker) {
-        assert!(
-            tracker.events().is_empty() && tracker.diffs().is_none(),
-            "tracker should be empty and not finished"
-        );
+        assert!(tracker.is_ready(), "tracker should be ready");
 
         // 1. Build, locally, the AMQ filter from the local splitted decompositions.
         let local_decompositions = self.local.split();
