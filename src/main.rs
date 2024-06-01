@@ -7,8 +7,8 @@ use std::{
 
 use crate::{
     crdt::GSet,
-    sync::{Baseline, BloomBuckets, Buckets, Protocol},
-    tracker::{NetworkBandwitdth, NetworkEvent},
+    sync::{baseline::Baseline, BuildProtocol, Protocol},
+    tracker::{DefaultTracker, NetworkBandwitdth, NetworkEvent, Tracker},
 };
 use rand::{
     distributions::{Alphanumeric, DistString},
@@ -16,13 +16,13 @@ use rand::{
     rngs::StdRng,
     SeedableRng,
 };
-use tracker::{DefaultTracker, Tracker};
 
 mod bloom;
 mod crdt;
 mod sync;
 mod tracker;
 
+/// Populates replicas with random data given a similarity degree.
 fn populate(
     count: usize,
     size: usize,
@@ -51,19 +51,16 @@ fn populate(
         remote.insert(item);
     }
 
-    assert_eq!(
-        local
-            .elements()
-            .symmetric_difference(remote.elements())
-            .count(),
-        2 * diff_items
-    );
+    let expected_diffs = local
+        .elements()
+        .symmetric_difference(remote.elements())
+        .count();
+    assert_eq!(expected_diffs, 2 * diff_items);
 
     (local, remote)
 }
 
 /// Runs the specified protocol and outputs the metrics obtained.
-/// NOTE: The values for download and upload are expressed in Bytes/s.
 fn run<P>(
     protocol: &mut P,
     id: Option<&str>,
@@ -99,7 +96,7 @@ fn run<P>(
 }
 
 fn main() {
-    let start = Instant::now();
+    let execution_time = Instant::now();
 
     let (item_count, item_size, seed) = (100_000, 80, random());
     let (download, upload) = (NetworkBandwitdth::Mbps(10.0), NetworkBandwitdth::Mbps(10.0));
@@ -109,39 +106,15 @@ fn main() {
         upload.as_bytes_per_sec() as usize,
     );
 
-    let (similarity, step) = (0..=100, 5);
-    println!("{} {} {step}", similarity.start(), similarity.end());
+    let (start, end, step) = (0, 100, 10);
+    println!("{start} {end} {step}");
 
-    for similarity_factor in similarity.rev().step_by(5) {
-        let (local, remote) = populate(item_count, item_size, similarity_factor, seed);
+    for similarity in (start..=end).rev().step_by(10) {
+        let (local, remote) = populate(item_count, item_size, similarity, seed);
 
-        run(
-            &mut Baseline::new(local.clone(), remote.clone()),
-            None,
-            similarity_factor,
-            download,
-            upload,
-        );
-
-        let load_factors = [1.0, 1.25];
-        for load_factor in load_factors {
-            run(
-                &mut Buckets::with_load_factor(local.clone(), remote.clone(), load_factor),
-                Some(&load_factor.to_string()),
-                similarity_factor,
-                download,
-                upload,
-            );
-        }
-
-        run(
-            &mut BloomBuckets::new(local.clone(), remote.clone()),
-            None,
-            similarity_factor,
-            download,
-            upload,
-        );
+        let mut baseline = Baseline::builder(local.clone(), remote.clone()).build();
+        run(&mut baseline, None, similarity, download, upload);
     }
 
-    eprintln!("time elapsed: {:.3?}", start.elapsed());
+    eprintln!("time elapsed: {:.3?}", execution_time.elapsed());
 }
