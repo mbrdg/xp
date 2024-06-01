@@ -1,5 +1,5 @@
 use crate::{
-    crdt::{Decomposable, GSet},
+    crdt::{gset::GSet, Decomposable},
     tracker::{DefaultTracker, NetworkEvent, Tracker},
 };
 

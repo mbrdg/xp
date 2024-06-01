@@ -1,8 +1,7 @@
-use core::f64;
 use std::{collections::BTreeMap, hash::BuildHasher, hash::RandomState, iter::zip};
 
 use crate::{
-    crdt::{Decomposable, GSet},
+    crdt::{gset::GSet, Decomposable},
     tracker::{DefaultTracker, NetworkEvent, Tracker},
 };
 

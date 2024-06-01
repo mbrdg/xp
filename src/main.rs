@@ -6,7 +6,7 @@ use std::{
 };
 
 use crate::{
-    crdt::GSet,
+    crdt::gset::GSet,
     sync::{baseline::Baseline, BuildProtocol, Protocol},
     tracker::{DefaultTracker, NetworkBandwitdth, NetworkEvent, Tracker},
 };
