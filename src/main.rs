@@ -71,29 +71,26 @@ fn run<P>(
     download: NetworkBandwitdth,
     upload: NetworkBandwitdth,
 ) where
-    P: Protocol<Tracker = DefaultTracker<NetworkEvent>>,
+    P: Protocol<Tracker = DefaultTracker>,
 {
     let mut tracker = DefaultTracker::new(download, upload);
     protocol.sync(&mut tracker);
 
     let type_name = {
         let name = any::type_name_of_val(&protocol).split("::").last().unwrap();
-        match id {
-            Some(id) => format!("{name}<{id}>"),
-            None => name.to_string(),
-        }
+        id.map_or(name.to_string(), |i| format!("{name}<{i}>"))
     };
 
-    if tracker.diffs() > 0 {
-        eprintln!(
-            "{type_name} not totally synced with {} diffs",
-            tracker.diffs()
-        );
+    let diffs = tracker.diffs();
+    if diffs > 0 {
+        eprintln!("{type_name} not totally synced with {diffs} diffs");
     }
 
-    let hops = tracker.events().len();
-    let duration: Duration = tracker.events().iter().map(NetworkEvent::duration).sum();
-    let bytes: usize = tracker.events().iter().map(NetworkEvent::bytes).sum();
+    let events = tracker.events();
+
+    let hops = events.len();
+    let duration = events.iter().map(NetworkEvent::duration).sum::<Duration>();
+    let bytes = events.iter().map(NetworkEvent::bytes).sum::<usize>();
 
     println!(
         "{type_name} {similarity} {hops} {:.3} {bytes}",
@@ -146,5 +143,5 @@ fn main() {
         );
     }
 
-    eprintln!("time elapsed {:.3?}", start.elapsed());
+    eprintln!("time elapsed: {:.3?}", start.elapsed());
 }

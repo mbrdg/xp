@@ -76,16 +76,16 @@ impl NetworkEvent {
     #[inline]
     pub fn bytes(&self) -> usize {
         match self {
-            Self::LocalToRemote { bytes, duration: _ } => *bytes,
-            Self::RemoteToLocal { bytes, duration: _ } => *bytes,
+            Self::LocalToRemote { bytes, .. } => *bytes,
+            Self::RemoteToLocal { bytes, .. } => *bytes,
         }
     }
 
     #[inline]
     pub fn duration(&self) -> Duration {
         match self {
-            Self::LocalToRemote { bytes: _, duration } => *duration,
-            Self::RemoteToLocal { bytes: _, duration } => *duration,
+            Self::LocalToRemote { duration, .. } => *duration,
+            Self::RemoteToLocal { duration, .. } => *duration,
         }
     }
 }
@@ -93,17 +93,14 @@ impl NetworkEvent {
 impl Event for NetworkEvent {}
 
 #[derive(Debug, Default)]
-pub struct DefaultTracker<E = NetworkEvent> {
-    events: Vec<E>,
+pub struct DefaultTracker {
+    events: Vec<NetworkEvent>,
     diffs: Option<usize>,
     download: NetworkBandwitdth,
     upload: NetworkBandwitdth,
 }
 
-impl<E> DefaultTracker<E>
-where
-    E: Event,
-{
+impl DefaultTracker {
     #[inline]
     #[must_use]
     pub fn new(download: NetworkBandwitdth, upload: NetworkBandwitdth) -> Self {
@@ -135,11 +132,8 @@ where
     }
 }
 
-impl<E> Tracker for DefaultTracker<E>
-where
-    E: Event,
-{
-    type Event = E;
+impl Tracker for DefaultTracker {
+    type Event = NetworkEvent;
 
     fn is_ready(&self) -> bool {
         self.events.is_empty() && self.diffs.is_none()
