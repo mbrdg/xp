@@ -22,14 +22,14 @@ pub struct BucketsBuilder {
 }
 
 impl BucketsBuilder {
-    fn load_factor(mut self, load_factor: f64) -> Self {
+    pub fn load_factor(mut self, load_factor: f64) -> Self {
         assert!(load_factor > 0.0, "load factor should be greater than 0.0");
 
         self.load_factor = Some(load_factor);
         self
     }
 
-    fn hasher(mut self, hasher: RandomState) -> Self {
+    pub fn hasher(mut self, hasher: RandomState) -> Self {
         self.hasher = Some(hasher);
         self
     }
