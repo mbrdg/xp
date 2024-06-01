@@ -19,12 +19,6 @@ pub enum NetworkBandwitdth {
     Gbps(f64),
 }
 
-impl Default for NetworkBandwitdth {
-    fn default() -> Self {
-        Self::Kbps(0.0)
-    }
-}
-
 impl NetworkBandwitdth {
     #[inline]
     pub fn as_bytes_per_sec(&self) -> f64 {
@@ -36,6 +30,9 @@ impl NetworkBandwitdth {
     }
 }
 
+/// Type of Event used by the [`DefaultTracker`].
+/// It holds the size of the transfered payload in Bytes and estimates the duration based on the
+/// bandwidth provided by the tracker that registers these kind of events.
 #[derive(Debug)]
 pub enum NetworkEvent {
     LocalToRemote { bytes: usize, duration: Duration },
@@ -92,7 +89,8 @@ impl NetworkEvent {
 
 impl Event for NetworkEvent {}
 
-#[derive(Debug, Default)]
+/// Default [`Tracker`] for operations over the Network.
+#[derive(Debug)]
 pub struct DefaultTracker {
     events: Vec<NetworkEvent>,
     diffs: Option<usize>,
