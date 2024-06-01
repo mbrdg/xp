@@ -7,9 +7,12 @@ use std::{
 
 use crate::{
     crdt::gset::GSet,
-    sync::{baseline::Baseline, BuildProtocol, Protocol},
+    sync::{
+        baseline::Baseline, bloombuckets::BloomBuckets, buckets::Buckets, BuildProtocol, Protocol,
+    },
     tracker::{DefaultTracker, NetworkBandwitdth, NetworkEvent, Tracker},
 };
+
 use rand::{
     distributions::{Alphanumeric, DistString},
     random,
@@ -24,38 +27,54 @@ mod tracker;
 
 /// Populates replicas with random data given a similarity degree.
 fn populate(
-    count: usize,
-    size: usize,
-    similarity: usize,
-    seed: u64,
+    num_items: usize,
+    item_size: usize,
+    similarity: f64,
+    rng: &mut StdRng,
 ) -> (GSet<String>, GSet<String>) {
-    let similar_items = (count as f64 * (similarity as f64 / 100.0)) as usize;
-    let diff_items = count - similar_items;
+    assert!(
+        (0.0..=1.0).contains(&similarity),
+        "similarity should be a ratio between 0.0 and 1.0"
+    );
 
-    let mut rng = StdRng::seed_from_u64(seed);
+    let similar = (num_items as f64 * similarity) as usize;
+    let diffs = num_items - similar;
 
-    let mut local = GSet::new();
-    let mut remote = GSet::new();
+    let common = (0..similar)
+        .map(|_| Alphanumeric.sample_string(rng, item_size))
+        .collect::<Vec<_>>();
 
-    for _ in 0..similar_items {
-        let item = Alphanumeric.sample_string(&mut rng, size);
-        local.insert(item.clone());
-        remote.insert(item);
-    }
+    let local = {
+        let mut gset = GSet::new();
+        let specific = (0..diffs).map(|_| Alphanumeric.sample_string(rng, item_size));
+        let items = common.iter().cloned().chain(specific);
 
-    for _ in 0..diff_items {
-        let item = Alphanumeric.sample_string(&mut rng, size);
-        local.insert(item);
+        for item in items {
+            gset.insert(item);
+        }
 
-        let item = Alphanumeric.sample_string(&mut rng, size);
-        remote.insert(item);
-    }
+        gset
+    };
 
-    let expected_diffs = local
-        .elements()
-        .symmetric_difference(remote.elements())
-        .count();
-    assert_eq!(expected_diffs, 2 * diff_items);
+    let remote = {
+        let mut gset = GSet::new();
+        let specific = (0..diffs).map(|_| Alphanumeric.sample_string(rng, item_size));
+        let items = common.into_iter().chain(specific);
+
+        for item in items {
+            gset.insert(item);
+        }
+
+        gset
+    };
+
+    debug_assert_eq!(
+        2 * diffs,
+        local
+            .elements()
+            .symmetric_difference(remote.elements())
+            .count(),
+    );
 
     (local, remote)
 }
@@ -64,12 +83,17 @@ fn populate(
 fn run<P>(
     protocol: &mut P,
     id: Option<&str>,
-    similarity: usize,
+    similarity: f64,
     download: NetworkBandwitdth,
     upload: NetworkBandwitdth,
 ) where
     P: Protocol<Tracker = DefaultTracker>,
 {
+    assert!(
+        (0.0..=1.0).contains(&similarity),
+        "similarity should be a ratio between 0.0 and 1.0"
+    );
+
     let mut tracker = DefaultTracker::new(download, upload);
     protocol.sync(&mut tracker);
 
@@ -90,7 +114,8 @@ fn run<P>(
     let bytes = events.iter().map(NetworkEvent::bytes).sum::<usize>();
 
     println!(
-        "{type_name} {similarity} {hops} {:.3} {bytes}",
+        "{type_name} {:.2} {hops} {:.3} {bytes}",
+        similarity * 100.0,
         duration.as_secs_f64()
     );
 }
@@ -98,22 +123,51 @@ fn run<P>(
 fn main() {
     let execution_time = Instant::now();
 
-    let (item_count, item_size, seed) = (100_000, 80, random());
-    let (download, upload) = (NetworkBandwitdth::Mbps(10.0), NetworkBandwitdth::Mbps(10.0));
+    let (iters, seed) = (10, random());
+    println!("{iters} {seed}");
+
+    let mut rng = StdRng::seed_from_u64(seed);
+
+    let (num_items, item_size) = (25_000, 50);
+    let (download, upload) = (NetworkBandwitdth::Kbps(32.0), NetworkBandwitdth::Kbps(32.0));
     println!(
-        "{item_count} {item_size} {seed} {} {}",
-        download.as_bytes_per_sec() as usize,
-        upload.as_bytes_per_sec() as usize,
+        "{num_items} {item_size} {:.2} {:.2}",
+        download.as_bytes_per_sec(),
+        upload.as_bytes_per_sec()
     );
 
+    // Varying similarity
     let (start, end, step) = (0, 100, 10);
     println!("{start} {end} {step}");
 
-    for similarity in (start..=end).rev().step_by(10) {
-        let (local, remote) = populate(item_count, item_size, similarity, seed);
+    let similarity = (start..=end)
+        .rev()
+        .step_by(step)
+        .map(|s| f64::from(s) / 100.0);
 
-        let mut baseline = Baseline::builder(local.clone(), remote.clone()).build();
-        run(&mut baseline, None, similarity, download, upload);
+    for s in similarity {
+        for _ in 0..iters {
+            let (local, remote) = populate(num_items, item_size, s, &mut rng);
+
+            let mut baseline = Baseline::builder(local.clone(), remote.clone()).build();
+            run(&mut baseline, None, s, download, upload);
+
+            let mut buckets = Buckets::builder(local.clone(), remote.clone())
+                .load_factor(1.0)
+                .build();
+            run(&mut buckets, Some("1.0"), s, download, upload);
+
+            let mut buckets = Buckets::builder(local.clone(), remote.clone())
+                .load_factor(4.0)
+                .build();
+            run(&mut buckets, Some("4.0"), s, download, upload);
+
+            let mut bloombuckets = BloomBuckets::builder(local, remote)
+                .load_factor(1.0)
+                .fpr(0.02)
+                .build();
+            run(&mut bloombuckets, Some("1.0, 0.02"), s, download, upload);
+        }
     }
 
     eprintln!("time elapsed: {:.3?}", execution_time.elapsed());
