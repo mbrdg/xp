@@ -11,7 +11,7 @@ pub struct BloomFilter<T: ?Sized> {
     base: BitVec,
     hashers: [RandomState; 2],
     hashes: u64,
-    marker: PhantomData<T>,
+    _marker: PhantomData<T>,
 }
 
 impl<T> BloomFilter<T>
@@ -22,8 +22,8 @@ where
     #[must_use]
     pub fn new(capacity: usize, fpr: f64) -> Self {
         assert!(
-            (0.0..1.0).contains(&fpr) && fpr != 0.0,
-            "false positive rate should be in the interval [0.0 and 1.0)"
+            (0.0..1.0).contains(&fpr) && fpr > 0.0,
+            "false positive rate should be a ratio greater than 0.0"
         );
 
         // Compute the optimal bitarray size `m` and the optimal number of hash functions `k`
@@ -34,7 +34,7 @@ where
             base: bitvec![0; max(m, 1)],
             hashers: [RandomState::new(), RandomState::new()],
             hashes: k,
-            marker: PhantomData,
+            _marker: PhantomData,
         }
     }
 
