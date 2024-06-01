@@ -264,7 +264,7 @@ impl Buckets {
     #[inline]
     #[must_use]
     pub fn with_load_factor(local: GSet<String>, remote: GSet<String>, load_factor: f64) -> Self {
-        assert!(load_factor >= 0.0, "load factor should be greater than 0.0");
+        assert!(load_factor > 0.0, "load factor should be greater than 0.0");
 
         Self {
             b: (local.len() as f64 * load_factor) as usize,
