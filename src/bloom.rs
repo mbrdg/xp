@@ -16,7 +16,7 @@ pub struct BloomFilter<T: ?Sized> {
 
 impl<T> BloomFilter<T>
 where
-    T: ?Sized + Hash,
+    T: ?Sized,
 {
     #[inline]
     #[must_use]
@@ -38,6 +38,16 @@ where
         }
     }
 
+    #[inline]
+    pub fn bitslice(&self) -> &BitSlice {
+        &self.base
+    }
+}
+
+impl<T> BloomFilter<T>
+where
+    T: ?Sized + Hash,
+{
     #[inline]
     pub fn contains(&self, value: &T) -> bool {
         let h = (
@@ -64,11 +74,6 @@ where
                 usize::try_from(h.0.wrapping_add(i.wrapping_mul(h.1))).unwrap() % self.base.len();
             self.base.set(bit, true);
         })
-    }
-
-    #[inline]
-    pub fn as_bitslice(&self) -> &BitSlice {
-        &self.base
     }
 }
 
