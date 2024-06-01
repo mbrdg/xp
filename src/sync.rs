@@ -3,6 +3,7 @@ use std::{
     collections::BTreeMap,
     hash::{BuildHasher, RandomState},
     iter::zip,
+    mem,
 };
 
 use crate::{
@@ -77,6 +78,20 @@ impl Protocol for Baseline {
     }
 }
 
+pub trait BloomBuilder {
+    type Decomposition: Decomposable;
+    type Item;
+
+    fn build_filter(decompositions: &[Self::Decomposition], fpr: f64) -> BloomFilter<Self::Item>;
+
+    fn size_of(filter: &BloomFilter<Self::Item>) -> usize {
+        let bitslice = filter.bitslice();
+        let hashers = filter.hashers();
+
+        bitslice.len() / 8 + min(bitslice.len() % 8, 1) + mem::size_of_val(hashers)
+    }
+}
+
 pub struct Bloom {
     local: GSet<String>,
     remote: GSet<String>,
@@ -104,16 +119,15 @@ impl Bloom {
 
         Self { local, remote, fpr }
     }
+}
 
-    #[inline]
-    fn size_of_filter(filter: &BloomFilter<String>) -> usize {
-        let len = filter.as_bitslice().len();
-        len / 8 + min(1, len % 8) + 2 * std::mem::size_of::<RandomState>()
-    }
+impl BloomBuilder for Bloom {
+    type Decomposition = GSet<String>;
+    type Item = String;
 
-    fn build_filter(slice: &[GSet<String>], fpr: f64) -> BloomFilter<String> {
-        let mut filter = BloomFilter::new(slice.len(), fpr);
-        slice.iter().for_each(|delta| {
+    fn build_filter(decompositions: &[Self::Decomposition], fpr: f64) -> BloomFilter<Self::Item> {
+        let mut filter = BloomFilter::new(decompositions.len(), fpr);
+        decompositions.iter().for_each(|delta| {
             let item = delta
                 .elements()
                 .iter()
@@ -140,7 +154,7 @@ impl Protocol for Bloom {
         // 1.2. Ship the Bloom filter to the remote replica.
         tracker.register(NetworkEvent::local_to_remote(
             tracker.upload(),
-            Bloom::size_of_filter(&local_filter),
+            <Bloom as BloomBuilder>::size_of(&local_filter),
         ));
 
         // 2.1. At the remote replica, split the state into join decompositions. Then split the
@@ -162,8 +176,11 @@ impl Protocol for Bloom {
         // 2.3. Send back to the remote replica the unknown decompositions and the Bloom Filter.
         tracker.register(NetworkEvent::remote_to_local(
             tracker.download(),
-            Bloom::size_of_filter(&remote_filter)
-                + local_unkown.iter().map(Bloom::size_of).sum::<usize>(),
+            <Bloom as BloomBuilder>::size_of(&remote_filter)
+                + local_unkown
+                    .iter()
+                    .map(<Bloom as Protocol>::size_of)
+                    .sum::<usize>(),
         ));
 
         // 3.1. At the local replica, split the state into join decompositions. Then split the
@@ -187,7 +204,10 @@ impl Protocol for Bloom {
         // 3.3. Send to the remote replica the unkown decompositions.
         tracker.register(NetworkEvent::local_to_remote(
             tracker.upload(),
-            remote_unknown.iter().map(Bloom::size_of).sum(),
+            remote_unknown
+                .iter()
+                .map(<Bloom as Protocol>::size_of)
+                .sum(),
         ));
 
         // 4. Join the incoming remote unkown decompositions.
@@ -209,9 +229,9 @@ impl Protocol for Bloom {
 }
 
 pub trait BucketBuilder {
-    type Bucket;
     type Replica: Decomposable;
     type Hasher: BuildHasher;
+    type Bucket;
 
     fn build_buckets(
         replica: &Self::Replica,
@@ -256,9 +276,9 @@ impl Buckets {
 }
 
 impl BucketBuilder for Buckets {
-    type Bucket = BTreeMap<u64, Self::Replica>;
     type Replica = GSet<String>;
     type Hasher = RandomState;
+    type Bucket = BTreeMap<u64, GSet<String>>;
 
     fn build_buckets(
         replica: &Self::Replica,
@@ -402,12 +422,31 @@ impl BloomBuckets {
             fpr: 1.0 / 100.0, // 1%
         }
     }
+
+    #[inline]
+    #[must_use]
+    pub fn with_fpr(local: GSet<String>, remote: GSet<String>, fpr: f64) -> Self {
+        assert!(
+            (0.0..1.0).contains(&fpr) && fpr != 0.0,
+            "false positive rate should be in the interval [0.0 and 1.0)"
+        );
+
+        Self {
+            local,
+            remote,
+            hasher: RandomState::new(),
+            fpr,
+        }
+    }
 }
 
-impl BloomBuckets {
-    fn build_filter(slice: &[GSet<String>], fpr: f64) -> BloomFilter<String> {
-        let mut filter = BloomFilter::new(slice.len(), fpr);
-        slice.iter().for_each(|delta| {
+impl BloomBuilder for BloomBuckets {
+    type Decomposition = GSet<String>;
+    type Item = String;
+
+    fn build_filter(decompositions: &[Self::Decomposition], fpr: f64) -> BloomFilter<Self::Item> {
+        let mut filter = BloomFilter::new(decompositions.len(), fpr);
+        decompositions.iter().for_each(|delta| {
             let item = delta
                 .elements()
                 .iter()
@@ -418,18 +457,12 @@ impl BloomBuckets {
 
         filter
     }
-
-    #[inline]
-    fn size_of_filter(filter: &BloomFilter<String>) -> usize {
-        let len = filter.as_bitslice().len();
-        len / 8 + min(1, len % 8) + 2 * std::mem::size_of::<RandomState>()
-    }
 }
 
 impl BucketBuilder for BloomBuckets {
-    type Bucket = BTreeMap<u64, Self::Replica>;
     type Replica = GSet<String>;
     type Hasher = RandomState;
+    type Bucket = BTreeMap<u64, GSet<String>>;
 
     fn build_buckets(
         replica: &Self::Replica,
@@ -479,7 +512,7 @@ impl Protocol for BloomBuckets {
         // 1.1. Ship the filter to the remote replica.
         tracker.register(NetworkEvent::local_to_remote(
             tracker.upload(),
-            BloomBuckets::size_of_filter(&local_filter),
+            <BloomBuckets as BloomBuilder>::size_of(&local_filter),
         ));
 
         // 2. Remotely, divide decompositions into common, i.e., probably in both replicas and into
@@ -506,11 +539,11 @@ impl Protocol for BloomBuckets {
         // 2.2. Ship the local unknown decompositions, the AMQ filter and the bucket's hashes.
         tracker.register(NetworkEvent::remote_to_local(
             tracker.download(),
-            BloomBuckets::size_of_filter(&remote_filter)
+            <BloomBuckets as BloomBuilder>::size_of(&remote_filter)
                 + std::mem::size_of::<u64>() * remote_hashes.len()
                 + local_unknown
                     .iter()
-                    .map(BloomBuckets::size_of)
+                    .map(<BloomBuckets as Protocol>::size_of)
                     .sum::<usize>(),
         ));
 
@@ -553,11 +586,11 @@ impl Protocol for BloomBuckets {
                 + non_matching_buckets
                     .iter()
                     .flatten()
-                    .map(BloomBuckets::size_of)
+                    .map(<BloomBuckets as Protocol>::size_of)
                     .sum::<usize>()
                 + remote_unknown
                     .iter()
-                    .map(BloomBuckets::size_of)
+                    .map(<BloomBuckets as Protocol>::size_of)
                     .sum::<usize>(),
         ));
 
@@ -570,8 +603,8 @@ impl Protocol for BloomBuckets {
 
         // These vectors yield the decompositions that were false positives.
         let (remote_escaped, local_escaped): (Vec<_>, Vec<_>) =
-            zip(non_matching_buckets, remote_buckets)
-                .flat_map(|(local, remote)| remote.zip(local))
+            zip(remote_buckets, non_matching_buckets)
+                .flat_map(|(remote, local)| remote.zip(local))
                 .map(|(remote, local)| (local.difference(&remote), remote.difference(&local)))
                 .unzip();
 
@@ -582,7 +615,10 @@ impl Protocol for BloomBuckets {
         //   to the AMQ filters.
         tracker.register(NetworkEvent::remote_to_local(
             tracker.download(),
-            local_escaped.iter().map(BloomBuckets::size_of).sum(),
+            local_escaped
+                .iter()
+                .map(<BloomBuckets as Protocol>::size_of)
+                .sum(),
         ));
 
         // 5. Merge the collected differences at both replicas.
