@@ -2,7 +2,9 @@
 
 use std::{
     any,
+    ops::Range,
     time::{Duration, Instant},
+    usize,
 };
 
 use crate::{
@@ -14,7 +16,7 @@ use crate::{
 };
 
 use rand::{
-    distributions::{Alphanumeric, DistString},
+    distributions::{Alphanumeric, DistString, Distribution, Uniform},
     random,
     rngs::StdRng,
     SeedableRng,
@@ -25,58 +27,96 @@ mod crdt;
 mod sync;
 mod tracker;
 
-/// Populates replicas with random data given a similarity degree.
-fn populate(
-    num_items: usize,
-    item_size: usize,
-    similarity: f64,
-    rng: &mut StdRng,
-) -> (GSet<String>, GSet<String>) {
-    assert!(
-        (0.0..=1.0).contains(&similarity),
-        "similarity should be a ratio between 0.0 and 1.0"
-    );
+struct ReplicaGenerator {
+    rng: StdRng,
+}
 
-    let similar = (num_items as f64 * similarity) as usize;
-    let diffs = num_items - similar;
-
-    let common = (0..similar)
-        .map(|_| Alphanumeric.sample_string(rng, item_size))
-        .collect::<Vec<_>>();
-
-    let local = {
-        let mut gset = GSet::new();
-        let specific = (0..diffs).map(|_| Alphanumeric.sample_string(rng, item_size));
-        let items = common.iter().cloned().chain(specific);
-
-        for item in items {
-            gset.insert(item);
+impl ReplicaGenerator {
+    #[inline]
+    #[must_use]
+    pub fn new(seed: u64) -> Self {
+        Self {
+            rng: StdRng::seed_from_u64(seed),
         }
+    }
 
-        gset
-    };
+    pub fn generate_single(&mut self, cardinality: usize, lengths: Range<usize>) -> GSet<String> {
+        let lengths = Uniform::from(lengths)
+            .sample_iter(&mut self.rng)
+            .take(cardinality)
+            .collect::<Vec<_>>();
 
-    let remote = {
-        let mut gset = GSet::new();
-        let specific = (0..diffs).map(|_| Alphanumeric.sample_string(rng, item_size));
-        let items = common.into_iter().chain(specific);
+        let mut replica = GSet::new();
+        lengths
+            .into_iter()
+            .map(|len| Alphanumeric.sample_string(&mut self.rng, len))
+            .for_each(|item| {
+                replica.insert(item);
+            });
 
-        for item in items {
-            gset.insert(item);
-        }
+        replica
+    }
 
-        gset
-    };
+    pub fn generate_pair_with_similarity(
+        &mut self,
+        cardinality: usize,
+        lengths: Range<usize>,
+        similarity: f64,
+    ) -> (GSet<String>, GSet<String>) {
+        assert!(
+            (0.0..=1.0).contains(&similarity),
+            "similarity should be a ratio between 0.0 and 1.0"
+        );
 
-    debug_assert_eq!(
-        2 * diffs,
-        local
-            .elements()
-            .symmetric_difference(remote.elements())
-            .count(),
-    );
+        let common = (cardinality as f64 * similarity) as usize;
+        let distinct = cardinality - common;
 
-    (local, remote)
+        let lengths = Uniform::from(lengths);
+
+        let common_items = lengths
+            .sample_iter(&mut self.rng)
+            .take(common)
+            .collect::<Vec<_>>()
+            .into_iter()
+            .map(|len| Alphanumeric.sample_string(&mut self.rng, len))
+            .collect::<Vec<_>>();
+
+        let local_only_items_iter = lengths
+            .sample_iter(&mut self.rng)
+            .take(distinct)
+            .collect::<Vec<_>>()
+            .into_iter()
+            .map(|len| Alphanumeric.sample_string(&mut self.rng, len));
+
+        let local_items = common_items.iter().cloned().chain(local_only_items_iter);
+        let mut local = GSet::new();
+        local_items.for_each(|item| {
+            local.insert(item);
+        });
+
+        let remote_only_items_iter = lengths
+            .sample_iter(&mut self.rng)
+            .take(distinct)
+            .collect::<Vec<_>>()
+            .into_iter()
+            .map(|len| Alphanumeric.sample_string(&mut self.rng, len));
+
+        let remote_items = common_items.into_iter().chain(remote_only_items_iter);
+        let mut remote = GSet::new();
+        remote_items.for_each(|item| {
+            remote.insert(item);
+        });
+
+        assert_eq!(
+            2 * distinct,
+            local
+                .elements()
+                .symmetric_difference(remote.elements())
+                .count()
+        );
+
+        (local, remote)
+    }
 }
 
 /// Runs the specified protocol and outputs the metrics obtained.
@@ -126,7 +166,7 @@ fn main() {
     let (iters, seed) = (10, random());
     println!("{iters} {seed}");
 
-    let mut rng = StdRng::seed_from_u64(seed);
+    let mut gen = ReplicaGenerator::new(seed);
 
     let (num_items, item_size) = (25_000, 50);
     let (download, upload) = (NetworkBandwitdth::Kbps(32.0), NetworkBandwitdth::Kbps(32.0));
@@ -147,7 +187,7 @@ fn main() {
 
     for s in similarity {
         for _ in 0..iters {
-            let (local, remote) = populate(num_items, item_size, s, &mut rng);
+            let (local, remote) = gen.generate_pair_with_similarity(32_000, 50..81, s);
 
             let mut baseline = Baseline::builder(local.clone(), remote.clone()).build();
             run(&mut baseline, None, s, download, upload);
