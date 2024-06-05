@@ -2,7 +2,7 @@ use std::{collections::BTreeMap, hash::BuildHasher, hash::RandomState, iter::zip
 
 use crate::{
     bloom::BloomFilter,
-    crdt::{gset::GSet, Decomposable},
+    crdt::{Decomposable, GSet},
     tracker::{DefaultTracker, NetworkEvent, Tracker},
 };
 

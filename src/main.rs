@@ -8,7 +8,7 @@ use std::{
 };
 
 use crate::{
-    crdt::gset::GSet,
+    crdt::GSet,
     sync::{
         baseline::Baseline, bloombuckets::BloomBuckets, buckets::Buckets, BuildProtocol, Protocol,
     },

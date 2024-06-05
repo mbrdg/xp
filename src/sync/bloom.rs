@@ -1,6 +1,6 @@
 use crate::{
     bloom::BloomFilter,
-    crdt::{gset::GSet, Decomposable},
+    crdt::{Decomposable, GSet},
     tracker::{DefaultTracker, NetworkEvent, Tracker},
 };
 
