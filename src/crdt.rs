@@ -17,6 +17,23 @@ pub struct GSet<T> {
     base: HashSet<T>,
 }
 
+impl<T> GSet<T> {
+    #[inline]
+    pub fn elements(&self) -> &HashSet<T> {
+        &self.base
+    }
+
+    #[inline]
+    pub fn is_empty(&self) -> bool {
+        self.base.is_empty()
+    }
+
+    #[inline]
+    pub fn len(&self) -> usize {
+        self.base.len()
+    }
+}
+
 impl<T> GSet<T>
 where
     T: Clone + Eq + Hash,
@@ -34,11 +51,6 @@ where
         self.base.contains(value)
     }
 
-    #[inline]
-    pub fn elements(&self) -> &HashSet<T> {
-        &self.base
-    }
-
     pub fn insert(&mut self, value: T) -> Self {
         if self.base.insert(value.clone()) {
             Self {
@@ -49,16 +61,6 @@ where
                 base: HashSet::new(),
             }
         }
-    }
-
-    #[inline]
-    pub fn is_empty(&self) -> bool {
-        self.base.is_empty()
-    }
-
-    #[inline]
-    pub fn len(&self) -> usize {
-        self.base.len()
     }
 }
 
@@ -159,7 +161,14 @@ mod gset {
 
 #[derive(Clone, Debug, Default)]
 pub struct GCounter<I> {
-    base: HashMap<I, i32>,
+    base: HashMap<I, i64>,
+}
+
+impl<I> GCounter<I> {
+    #[inline]
+    pub fn count(&self) -> i64 {
+        self.base.values().sum()
+    }
 }
 
 impl<I> GCounter<I>
@@ -172,11 +181,6 @@ where
         Self {
             base: HashMap::new(),
         }
-    }
-
-    #[inline]
-    pub fn count(&self) -> i32 {
-        self.base.values().sum()
     }
 
     pub fn increment(&mut self, id: &I) -> Self {
