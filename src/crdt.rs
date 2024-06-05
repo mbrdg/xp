@@ -291,3 +291,231 @@ mod gcounter {
         );
     }
 }
+
+#[derive(Clone, Debug, Default)]
+pub struct AWSet<T> {
+    inserted: HashMap<u64, T>,
+    removed: HashSet<u64>,
+}
+
+impl<T> AWSet<T>
+where
+    T: Eq + Hash,
+{
+    #[inline]
+    pub fn contains(&self, value: &T) -> bool {
+        self.inserted
+            .iter()
+            .any(|(id, v)| value == v && !self.removed.contains(id))
+    }
+
+    #[inline]
+    pub fn is_empty(&self) -> bool {
+        !self.inserted.keys().any(|id| !self.removed.contains(id))
+    }
+
+    #[inline]
+    pub fn len(&self) -> usize {
+        self.inserted
+            .keys()
+            .filter(|id| !self.removed.contains(id))
+            .count()
+    }
+}
+
+impl<T> AWSet<T>
+where
+    T: Eq + Hash + Clone,
+{
+    #[inline]
+    #[must_use]
+    pub fn new() -> Self {
+        Self {
+            inserted: HashMap::new(),
+            removed: HashSet::new(),
+        }
+    }
+
+    #[inline]
+    pub fn elements(&self) -> HashSet<T> {
+        self.inserted
+            .iter()
+            .filter_map(|(id, value)| (!self.removed.contains(id)).then_some(value))
+            .cloned()
+            .collect()
+    }
+
+    pub fn insert(&mut self, value: T) -> Self {
+        let id = max(self.inserted.keys().max(), self.removed.iter().max()).unwrap_or(&0) + 1;
+        self.inserted.insert(id, value.clone());
+
+        Self {
+            inserted: HashMap::from([(id, value)]),
+            removed: HashSet::new(),
+        }
+    }
+
+    pub fn remove(&mut self, value: &T) -> Self {
+        let id = self
+            .inserted
+            .iter()
+            .find(|(id, v)| value == *v && !self.removed.contains(id))
+            .map(|(id, _)| {
+                self.removed.insert(*id);
+                *id
+            });
+
+        if let Some(id) = id {
+            Self {
+                inserted: HashMap::new(),
+                removed: HashSet::from([id]),
+            }
+        } else {
+            Self {
+                inserted: HashMap::new(),
+                removed: HashSet::new(),
+            }
+        }
+    }
+}
+
+impl<T> Decomposable for AWSet<T>
+where
+    T: Clone + Eq + Hash,
+{
+    type Decomposition = AWSet<T>;
+
+    fn split(&self) -> Vec<Self::Decomposition> {
+        let inserted = self.inserted.iter().map(|(id, v)| Self {
+            inserted: HashMap::from([(*id, v.clone())]),
+            removed: HashSet::new(),
+        });
+
+        let removed = self.removed.iter().cloned().map(|id| Self {
+            inserted: HashMap::new(),
+            removed: HashSet::from([id]),
+        });
+
+        inserted.chain(removed).collect()
+    }
+
+    fn join(&mut self, deltas: Vec<Self::Decomposition>) {
+        deltas.into_iter().for_each(|delta| {
+            self.inserted.extend(delta.inserted);
+            self.removed.extend(delta.removed);
+        })
+    }
+
+    fn difference(&self, remote: &Self::Decomposition) -> Self::Decomposition {
+        Self {
+            inserted: self
+                .inserted
+                .iter()
+                .filter(|(id, _)| !remote.inserted.contains_key(id))
+                .map(|(id, v)| (*id, v.clone()))
+                .collect(),
+            removed: self.removed.difference(&remote.removed).cloned().collect(),
+        }
+    }
+}
+
+impl<T> PartialEq for AWSet<T>
+where
+    T: Eq + Hash,
+{
+    fn eq(&self, other: &Self) -> bool {
+        if self.len() != other.len() {
+            return false;
+        }
+
+        self.inserted
+            .iter()
+            .filter_map(|(id, v)| (!self.removed.contains(id)).then_some(v))
+            .all(|id| other.contains(id))
+    }
+}
+
+impl<T> Eq for AWSet<T> where T: Eq + Hash {}
+
+#[cfg(test)]
+mod awset {
+    use super::*;
+
+    #[test]
+    fn test_insert_and_remove() {
+        let mut awset = AWSet::new();
+        assert_eq!(awset.len(), 0);
+        assert!(awset.is_empty());
+
+        awset.insert(1);
+        awset.insert(2);
+        awset.insert(3);
+        assert_eq!(awset.len(), 3);
+        assert!(!awset.is_empty());
+
+        awset.remove(&2);
+        awset.remove(&2);
+        awset.remove(&4);
+        assert_eq!(awset.len(), 2);
+
+        awset.insert(2);
+        awset.insert(4);
+        assert_eq!(awset.len(), 4);
+    }
+
+    #[test]
+    fn test_split_and_join() {
+        let mut splittable = AWSet::new();
+
+        splittable.insert(1);
+        splittable.insert(2);
+        splittable.insert(3);
+        splittable.remove(&2);
+        splittable.remove(&4);
+
+        assert!(splittable.contains(&1));
+        assert!(splittable.contains(&3));
+
+        let decompositions = splittable.split();
+        assert_eq!(decompositions.len(), 4);
+
+        let mut joinable = AWSet::new();
+        joinable.join(decompositions);
+
+        assert_eq!(splittable, joinable);
+    }
+
+    #[test]
+    fn test_difference() {
+        let local = AWSet {
+            inserted: HashMap::from([(1, 1), (2, 3), (3, 2), (4, 4), (5, 10)]),
+            removed: HashSet::from([1, 3]),
+        };
+
+        let remote = AWSet {
+            inserted: HashMap::from([(1, 1), (2, 3), (3, 2)]),
+            removed: HashSet::from([1, 2]),
+        };
+
+        let diff = local.difference(&remote);
+        assert_eq!(diff.inserted, HashMap::from([(4, 4), (5, 10)]));
+        assert_eq!(diff.removed, HashSet::from([3]));
+    }
+
+    #[test]
+    fn test_difference_synced() {
+        let local = AWSet {
+            inserted: HashMap::from([(1, 1), (2, 3), (3, 2), (4, 4), (5, 10)]),
+            removed: HashSet::from([1, 3]),
+        };
+
+        let remote = AWSet {
+            inserted: HashMap::from([(1, 1), (2, 3), (3, 2), (4, 4), (5, 10)]),
+            removed: HashSet::from([1, 3]),
+        };
+
+        let diff = local.difference(&remote);
+        assert!(diff.inserted.is_empty());
+        assert!(diff.removed.is_empty());
+    }
+}
