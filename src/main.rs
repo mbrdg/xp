@@ -19,7 +19,6 @@ use rand::{
     distributions::{Alphanumeric, DistString, Distribution, Uniform},
     random,
     rngs::StdRng,
-    SeedableRng,
 };
 
 mod bloom;
@@ -27,96 +26,78 @@ mod crdt;
 mod sync;
 mod tracker;
 
-struct ReplicaGenerator {
-    rng: StdRng,
+fn populate_gset(cardinality: usize, lengths: Range<usize>, rng: &mut StdRng) -> GSet<String> {
+    let mut replica = GSet::new();
+
+    Uniform::from(lengths)
+        .sample_iter(rng.clone())
+        .map(|len| Alphanumeric.sample_string(rng, len))
+        .take(cardinality)
+        .for_each(|item| {
+            replica.insert(item);
+        });
+
+    assert_eq!(cardinality, replica.len());
+    replica
 }
 
-impl ReplicaGenerator {
-    #[inline]
-    #[must_use]
-    pub fn new(seed: u64) -> Self {
-        Self {
-            rng: StdRng::seed_from_u64(seed),
-        }
-    }
+fn populate_similar_gsets(
+    cardinality: usize,
+    lengths: Range<usize>,
+    similarity: f64,
+    rng: &mut StdRng,
+) -> (GSet<String>, GSet<String>) {
+    assert!(
+        (0.0..1.0).contains(&similarity),
+        "similarity should be a ratio between 0.0 and 1.0"
+    );
 
-    pub fn generate_single(&mut self, cardinality: usize, lengths: Range<usize>) -> GSet<String> {
-        let lengths = Uniform::from(lengths)
-            .sample_iter(&mut self.rng)
-            .take(cardinality)
-            .collect::<Vec<_>>();
+    let num_similar_items = (cardinality as f64 * similarity) as usize;
+    let num_diff_items = cardinality - num_similar_items;
 
-        let mut replica = GSet::new();
-        lengths
-            .into_iter()
-            .map(|len| Alphanumeric.sample_string(&mut self.rng, len))
-            .for_each(|item| {
-                replica.insert(item);
-            });
+    let mut gsets = (GSet::new(), GSet::new());
 
-        replica
-    }
-
-    pub fn generate_pair_with_similarity(
-        &mut self,
-        cardinality: usize,
-        lengths: Range<usize>,
-        similarity: f64,
-    ) -> (GSet<String>, GSet<String>) {
-        assert!(
-            (0.0..=1.0).contains(&similarity),
-            "similarity should be a ratio between 0.0 and 1.0"
-        );
-
-        let common = (cardinality as f64 * similarity) as usize;
-        let distinct = cardinality - common;
-
-        let lengths = Uniform::from(lengths);
-
-        let common_items = lengths
-            .sample_iter(&mut self.rng)
-            .take(common)
-            .collect::<Vec<_>>()
-            .into_iter()
-            .map(|len| Alphanumeric.sample_string(&mut self.rng, len))
-            .collect::<Vec<_>>();
-
-        let local_only_items_iter = lengths
-            .sample_iter(&mut self.rng)
-            .take(distinct)
-            .collect::<Vec<_>>()
-            .into_iter()
-            .map(|len| Alphanumeric.sample_string(&mut self.rng, len));
-
-        let local_items = common_items.iter().cloned().chain(local_only_items_iter);
-        let mut local = GSet::new();
-        local_items.for_each(|item| {
-            local.insert(item);
+    // Generate common items for both gsets
+    Uniform::from(lengths.clone())
+        .sample_iter(rng.clone())
+        .map(|len| Alphanumeric.sample_string(rng, len))
+        .take(num_similar_items)
+        .for_each(|item| {
+            gsets.0.insert(item.clone());
+            gsets.1.insert(item);
         });
 
-        let remote_only_items_iter = lengths
-            .sample_iter(&mut self.rng)
-            .take(distinct)
-            .collect::<Vec<_>>()
-            .into_iter()
-            .map(|len| Alphanumeric.sample_string(&mut self.rng, len));
-
-        let remote_items = common_items.into_iter().chain(remote_only_items_iter);
-        let mut remote = GSet::new();
-        remote_items.for_each(|item| {
-            remote.insert(item);
+    // Generate diff items for the first gset
+    Uniform::from(lengths.clone())
+        .sample_iter(rng.clone())
+        .map(|len| Alphanumeric.sample_string(rng, len))
+        .take(num_diff_items)
+        .for_each(|item| {
+            gsets.0.insert(item);
         });
 
-        assert_eq!(
-            2 * distinct,
-            local
-                .elements()
-                .symmetric_difference(remote.elements())
-                .count()
-        );
+    // Generate diff items for the second gset
+    Uniform::from(lengths)
+        .sample_iter(rng.clone())
+        .map(|len| Alphanumeric.sample_string(rng, len))
+        .take(num_diff_items)
+        .for_each(|item| {
+            gsets.1.insert(item);
+        });
 
-        (local, remote)
-    }
+    // Ensure that each set has exactly the appropriate number of distinct items
+    assert_eq!(cardinality, gsets.0.len());
+    assert_eq!(cardinality, gsets.1.len());
+    assert_eq!(
+        gsets
+            .0
+            .elements()
+            .symmetric_difference(gsets.1.elements())
+            .count(),
+        2 * num_diff_items
+    );
+
+    gsets
 }
 
 /// Runs the specified protocol and outputs the metrics obtained.
