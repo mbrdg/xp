@@ -152,7 +152,6 @@ impl Protocol for BloomBuckets {
             })
             .collect::<HashMap<_, _>>();
 
-        dbg!(&local_buckets, &remote_buckets);
         debug_assert_eq!(local_buckets.len(), remote_buckets.len());
         debug_assert!(remote_buckets.keys().all(|k| local_buckets.contains_key(k)));
 
@@ -182,11 +181,6 @@ impl Protocol for BloomBuckets {
         self.local.join(local_unknown);
         self.local.join(local_false_positives);
 
-        dbg!(self
-            .local
-            .elements()
-            .symmetric_difference(self.remote.elements())
-            .collect::<Vec<_>>());
         // 6. Sanity Check.
         tracker.finish(
             self.local
