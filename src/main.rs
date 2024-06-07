@@ -128,14 +128,13 @@ fn run<P>(
     }
 
     let events = tracker.events();
-
-    let hops = events.len();
-    let duration = events.iter().map(NetworkEvent::duration).sum::<Duration>();
-    let bytes = events.iter().map(NetworkEvent::bytes).sum::<usize>();
+    let duration: Duration = events.iter().map(NetworkEvent::duration).sum();
+    let bytes: usize = events.iter().map(NetworkEvent::bytes).sum();
 
     println!(
-        "{type_name} {:.2} {hops} {:.3} {bytes}",
-        similarity * 100.0,
+        "{type_name} {} {} {bytes} {:.3}",
+        upload.as_bytes_per_sec(),
+        download.as_bytes_per_sec(),
         duration.as_secs_f64()
     );
 }
@@ -143,51 +142,18 @@ fn run<P>(
 fn main() {
     let execution_time = Instant::now();
 
-    let (iters, seed) = (10, random());
+    let (iters, seed) = (3, random());
+    let _rng = StdRng::seed_from_u64(seed);
     println!("{iters} {seed}");
 
-    let mut gen = ReplicaGenerator::new(seed);
+    // First experiment - symmetric channels and similar cardinality
+    let _cardinality = 100_000;
+    let _lengths = 50..80;
+    let (_upload, _downloadd) = (NetworkBandwitdth::Mbps(10.0), NetworkBandwitdth::Mbps(10.0));
+    let similarities = (0..=100).rev().step_by(10).map(|s| f64::from(s) / 100.0);
 
-    let (num_items, item_size) = (25_000, 50);
-    let (download, upload) = (NetworkBandwitdth::Kbps(32.0), NetworkBandwitdth::Kbps(32.0));
-    println!(
-        "{num_items} {item_size} {:.2} {:.2}",
-        download.as_bytes_per_sec(),
-        upload.as_bytes_per_sec()
-    );
-
-    // Varying similarity
-    let (start, end, step) = (0, 100, 10);
-    println!("{start} {end} {step}");
-
-    let similarity = (start..=end)
-        .rev()
-        .step_by(step)
-        .map(|s| f64::from(s) / 100.0);
-
-    for s in similarity {
-        for _ in 0..iters {
-            let (local, remote) = gen.generate_pair_with_similarity(32_000, 50..81, s);
-
-            let mut baseline = Baseline::builder(local.clone(), remote.clone()).build();
-            run(&mut baseline, None, s, download, upload);
-
-            let mut buckets = Buckets::builder(local.clone(), remote.clone())
-                .load_factor(1.0)
-                .build();
-            run(&mut buckets, Some("1.0"), s, download, upload);
-
-            let mut buckets = Buckets::builder(local.clone(), remote.clone())
-                .load_factor(4.0)
-                .build();
-            run(&mut buckets, Some("4.0"), s, download, upload);
-
-            let mut bloombuckets = BloomBuckets::builder(local, remote)
-                .load_factor(1.0)
-                .fpr(0.02)
-                .build();
-            run(&mut bloombuckets, Some("1.0, 0.02"), s, download, upload);
-        }
+    for _similarity in similarities {
+        todo!()
     }
 
     eprintln!("time elapsed: {:.3?}", execution_time.elapsed());
