@@ -93,7 +93,8 @@ impl Protocol for Bloom {
         self.local.join(local_unknown);
         self.remote.join(remote_unknown);
 
-        // Final Sanity check. This algorithm does not guarantee full sync.
+        // 6. Sanity check.
+        // NOTE: This algorithm does not guarantee full sync.
         tracker.finish(
             self.local
                 .elements()
