@@ -3,44 +3,27 @@ use crate::{
     tracker::{DefaultTracker, NetworkEvent, Tracker},
 };
 
-use super::{BuildProtocol, Protocol, ReplicaSize};
+use super::Protocol;
 
 pub struct Baseline {
     local: GSet<String>,
     remote: GSet<String>,
 }
 
-pub struct BaselineBuilder {
-    local: GSet<String>,
-    remote: GSet<String>,
-}
-
-impl BuildProtocol for BaselineBuilder {
-    type Protocol = Baseline;
-
-    fn build(self) -> Self::Protocol {
-        Baseline {
-            local: self.local,
-            remote: self.remote,
-        }
-    }
-}
-
-impl ReplicaSize for Baseline {
-    type Replica = GSet<String>;
-
-    fn size_of(replica: &Self::Replica) -> usize {
-        replica.elements().iter().map(String::len).sum()
+impl Baseline {
+    #[inline]
+    #[must_use]
+    pub fn new(local: GSet<String>, remote: GSet<String>) -> Self {
+        Self { local, remote }
     }
 }
 
 impl Protocol for Baseline {
     type Replica = GSet<String>;
-    type Builder = BaselineBuilder;
     type Tracker = DefaultTracker;
 
-    fn builder(local: Self::Replica, remote: Self::Replica) -> Self::Builder {
-        BaselineBuilder { local, remote }
+    fn size_of(replica: &Self::Replica) -> usize {
+        replica.elements().iter().map(String::len).sum()
     }
 
     fn sync(&mut self, tracker: &mut Self::Tracker) {
@@ -49,28 +32,25 @@ impl Protocol for Baseline {
             "tracker should be ready, i.e., no captured events and not finished"
         );
 
-        // 1. Ship the full local state and send it the remote replica.
+        // 1. Send the entire state from the local to the remote replica.
         let local_state = self.local.clone();
 
         tracker.register(NetworkEvent::local_to_remote(
             tracker.upload(),
-            Baseline::size_of(&local_state),
+            <Baseline as Protocol>::size_of(&local_state),
         ));
 
-        // 2.1. Compute the optimal delta based on the remote replica state.
+        // 2. Compute the optimal delta based on the remote replica state.
         let remote_unseen = local_state.difference(&self.remote);
         let local_unseen = self.remote.difference(&local_state);
 
-        // 2.2. Join the decompositions that are unknown to the remote replica.
-        self.remote.join(vec![remote_unseen]);
-
-        // 2.3. Send back to the local replica the decompositions unknown to the local replica.
         tracker.register(NetworkEvent::remote_to_local(
             tracker.download(),
-            Baseline::size_of(&local_unseen),
+            <Baseline as Protocol>::size_of(&local_unseen),
         ));
 
-        // 3. Merge the minimum delta received from the remote replica.
+        // 3. Join the decompositions that are unknown to the remote replica.
+        self.remote.join(vec![remote_unseen]);
         self.local.join(vec![local_unseen]);
 
         // 4. Sanity check.
@@ -116,7 +96,7 @@ mod tests {
             gset
         };
 
-        let mut baseline = Baseline::builder(local, remote).build();
+        let mut baseline = Baseline::new(local, remote);
         let (download, upload) = (NetworkBandwitdth::Kbps(0.5), NetworkBandwitdth::Kbps(0.5));
         let mut tracker = DefaultTracker::new(download, upload);
 

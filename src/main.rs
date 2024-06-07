@@ -9,9 +9,7 @@ use std::{
 
 use crate::{
     crdt::GSet,
-    sync::{
-        baseline::Baseline, bloombuckets::BloomBuckets, buckets::Buckets, BuildProtocol, Protocol,
-    },
+    sync::Protocol,
     tracker::{DefaultTracker, NetworkBandwitdth, NetworkEvent, Tracker},
 };
 
@@ -19,6 +17,7 @@ use rand::{
     distributions::{Alphanumeric, DistString, Distribution, Uniform},
     random,
     rngs::StdRng,
+    SeedableRng,
 };
 
 mod bloom;

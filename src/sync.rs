@@ -1,57 +1,155 @@
-use std::{cmp::min, hash::BuildHasher, mem};
+use std::{
+    collections::BTreeMap,
+    hash::{BuildHasher, Hash, RandomState},
+    marker::PhantomData,
+    mem,
+};
 
-use crate::{bloom::BloomFilter, crdt::Decomposable, tracker::Tracker};
+use crate::{
+    bloom::BloomFilter,
+    crdt::{Decomposable, GSet},
+    tracker::Tracker,
+};
 
 pub mod baseline;
 pub mod bloom;
 pub mod bloombuckets;
 pub mod buckets;
 
-trait ReplicaSize {
-    type Replica: Decomposable;
-
-    fn size_of(replica: &Self::Replica) -> usize;
-}
-
 pub trait Protocol {
     type Replica: Decomposable;
-    type Builder: BuildProtocol;
     type Tracker: Tracker;
 
-    fn builder(local: Self::Replica, remote: Self::Replica) -> Self::Builder;
+    fn size_of(replica: &Self::Replica) -> usize;
     fn sync(&mut self, tracker: &mut Self::Tracker);
 }
 
-pub trait BuildProtocol {
-    type Protocol: Protocol;
+type Bucket<T> = BTreeMap<u64, T>;
 
-    fn build(self) -> Self::Protocol;
+#[derive(Clone, Debug, Default)]
+pub struct BucketDispatcher<T> {
+    num_buckets: usize,
+    hasher: RandomState,
+    _marker: PhantomData<T>,
 }
 
-trait BuildBloomFilters {
-    type Decomposition: Decomposable;
-    type Item;
+impl<T> BucketDispatcher<GSet<T>>
+where
+    T: Clone + Eq + Hash,
+{
+    pub fn new(num_buckets: usize) -> Self {
+        assert_ne!(num_buckets, 0, "at least one bucket should exist");
 
-    fn filter(decompositions: &[Self::Decomposition], fpr: f64) -> BloomFilter<Self::Item>;
+        Self {
+            num_buckets,
+            hasher: RandomState::new(),
+            _marker: PhantomData,
+        }
+    }
 
-    fn size_of(filter: &BloomFilter<Self::Item>) -> usize {
-        let bitslice = filter.bitslice();
-        let hashers = filter.hashers();
+    fn dispatch(&self, replica: &GSet<T>) -> Vec<Bucket<GSet<T>>> {
+        let mut buckets = vec![Bucket::new(); self.num_buckets];
 
-        bitslice.len() / 8 + min(bitslice.len() % 8, 1) + mem::size_of_val(hashers)
+        replica.split().into_iter().for_each(|delta| {
+            let item = delta
+                .elements()
+                .iter()
+                .next()
+                .expect("a decomposition should have a single item");
+
+            let hash = self.hasher.hash_one(item);
+            let idx = usize::try_from(hash).unwrap() % buckets.len();
+
+            buckets[idx].insert(hash, delta);
+        });
+
+        buckets
     }
 }
 
-trait BuildBuckets {
-    type Replica: Decomposable;
-    type Hasher: BuildHasher;
-    type Bucket;
+impl<T> BucketDispatcher<T>
+where
+    T: Decomposable,
+{
+    fn hashes(&self, buckets: &[Bucket<T>]) -> Vec<u64> {
+        buckets
+            .iter()
+            .map(|bucket| {
+                let id = bucket
+                    .keys()
+                    .fold(String::new(), |acc, h| format!("{acc}{h}"));
 
-    fn buckets(
-        replica: &Self::Replica,
-        hasher: &Self::Hasher,
-        num_buckets: usize,
-    ) -> Vec<Self::Bucket>;
+                self.hasher.hash_one(id)
+            })
+            .collect()
+    }
+}
 
-    fn hashes(buckets: &[Self::Bucket], hasher: &Self::Hasher) -> Vec<u64>;
+#[derive(Debug)]
+pub struct Bloomer<T> {
+    fpr: f64,
+    _marker: PhantomData<T>,
+}
+
+impl<T> Bloomer<T> {
+    #[inline]
+    #[must_use]
+    pub fn new(fpr: f64) -> Self {
+        assert!(
+            fpr > 0.0 && (..1.0).contains(&fpr),
+            "false positive rate should be a ratio greater than 0.0"
+        );
+
+        Self {
+            fpr,
+            _marker: PhantomData,
+        }
+    }
+
+    #[inline]
+    pub const fn fpr(&self) -> f64 {
+        self.fpr
+    }
+
+    #[inline]
+    pub fn size_of(filter: &BloomFilter<T>) -> usize {
+        filter.bitslice().chunks(8).count()
+            + mem::size_of::<RandomState>() * 2
+            + mem::size_of::<u64>()
+    }
+}
+
+impl<T> Bloomer<GSet<T>>
+where
+    T: Hash,
+{
+    fn filter_from(&self, decompositions: &[GSet<T>]) -> BloomFilter<T> {
+        let mut filter = BloomFilter::new(decompositions.len(), self.fpr);
+
+        decompositions.iter().for_each(|delta| {
+            let item = delta
+                .elements()
+                .iter()
+                .next()
+                .expect("a decomposition should have a single element");
+            filter.insert(item);
+        });
+
+        filter
+    }
+
+    fn partition(
+        &self,
+        filter: &BloomFilter<T>,
+        decompositions: Vec<GSet<T>>,
+    ) -> (Vec<GSet<T>>, Vec<GSet<T>>) {
+        decompositions.into_iter().partition(|delta| {
+            let item = delta
+                .elements()
+                .iter()
+                .next()
+                .expect("a decomposition should have a single item");
+            filter.contains(item)
+        })
+    }
 }
