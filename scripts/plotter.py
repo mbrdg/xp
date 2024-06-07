@@ -2,10 +2,9 @@
 # Plots the data gathered from experiements
 
 import argparse
-from collections import defaultdict, namedtuple
+from collections import defaultdict
 from cycler import cycler
 import fileinput
-from pathlib import Path
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib import ticker
@@ -13,102 +12,75 @@ from matplotlib import ticker
 COLORS = ["#0173B2", "#DE8F05", "#029E73", "#D55E00", "#CC78BC",
           "#CA9161", "#FBAFE4", "#949494", "#ECE133", "#56B4E9"]
 
+
 def main() -> None:
     parser = argparse.ArgumentParser(prog="plotter")
-    parser.add_argument("filename", nargs="?")
+    parser.add_argument("filename", nargs="?", default="-")
     args = parser.parse_args()
 
-    # File reading
-    file = args.filename if args.filename else None
-    with fileinput.input(files=file) as f:
-        lines = [line.rstrip() for line in f]
-
-    # Build the config from the experiment
-    # NOTE: The download and upload values should be change if they are changed in the experiment.
-    Config = namedtuple(
-        "Config",
-        ["item_count", "item_size", "seed", "download", "upload"],
-        defaults=[0, 0, 42, 1, 1],
-    )
-    config_params = (int(p) for p in lines[0].split(" ", 5))
-    config = Config(*config_params)
-    print(config)
-
-    # Similarities
-    start, stop, step = tuple(int(p) for p in lines[1].split(" ", 3))
-    dissimilarity = np.arange(start, stop + 1, step)
-
-    # Create the plot environment
+    # Set global configs for plotting
     plt.style.use("seaborn-v0_8-paper")
     plt.rc("font", family="serif")
     plt.rc("axes", prop_cycle=cycler("color", COLORS))
-    figsize = (6.4 * 2, 4.8)
 
-    fig, ax = plt.subplots(ncols=2, figsize=figsize, layout="constrained")
-    percentage_formatter = ticker.PercentFormatter(stop)
+    # File reading
+    with fileinput.input(files=args.filename) as f:
+        # Ignore the the line containing the seed
+        _ = f.readline()
+
+        # Read the data for the experiment with similar replicas and symmetric channels
+        data = defaultdict(list)
+        download, upload = None, None
+        while line := f.readline():
+            parts = line.rstrip().split(maxsplit=6)
+
+            # read the values for the links
+            if download is None or upload is None:
+                download, upload = int(parts[3]), int(parts[4])
+            assert download == int(parts[3]) and upload == int(parts[4])
+
+            data[parts[0]].append((int(parts[5]), float(parts[6])))
+
+    assert download is not None and upload is not None
+    assert all(len(v) == 11 for v in data.values())
+    similarity = np.arange(0, 101, 10)[::-1]
+
+    percent_formatter = ticker.PercentFormatter()
     bytes_formatter = ticker.EngFormatter(unit="B")
 
-    ax[0].xaxis.set_major_formatter(percentage_formatter)
+    figsize = (6.4 * 2, 4.8)
+    _, ax = plt.subplots(ncols=2, figsize=figsize, layout="constrained")
+
+    ax[0].xaxis.set_major_formatter(percent_formatter)
     ax[0].yaxis.set_major_formatter(bytes_formatter)
     ax[0].grid(linestyle="--", linewidth=0.5)
-
     ax[0].set(
-        xlabel="Dissimilarity Ratio",
+        xlabel="Similarity Ratio",
         xmargin=0,
         ylabel="Bytes",
     )
 
-    ax[1].xaxis.set_major_formatter(percentage_formatter)
-    up, down = bytes_formatter(config.upload), bytes_formatter(config.download)
+    ax[1].xaxis.set_major_formatter(percent_formatter)
     ax[1].grid(linestyle="--", linewidth=0.5)
-
     ax[1].set(
-        xlabel="Dissimilarity Ratio",
+        xlabel="Similarity Ratio",
         xmargin=0,
-        ylabel=f"Sync Time (s)\n{up}/s up, {down}/s down",
+        ylabel=f"Sync Time (s)\n{bytes_formatter(upload)}/s up, {bytes_formatter(download)}/s down",
     )
 
-    # Plot the size of a replica to give a reference
-    replica_size = config.item_count * config.item_size
-    ax[0].axhline(replica_size, linestyle="--", color="grey", alpha=0.4)
-    ax[0].annotate(
-        "Replica Size",
-        xy=(82.5, replica_size * 1.025),
-        xycoords=(ax[0].get_xaxis_transform(), ax[0].get_yaxis_transform()),
-    )
+    # Actual plotting
+    for proto, metrics in data.items():
+        transferred = np.array([v[0] for v in metrics], dtype=int)
+        ax[0].plot(similarity, transferred, marker="o", label=proto)
 
-    # Data retrieaval from the experiment file
-    exchanged_bytes = defaultdict(list)
-    durations = defaultdict(list)
-    hops = defaultdict(list)
-
-    for run in lines[2:]:
-        run_params = run.split(" ", 5)
-
-        proto = run_params[0]
-        exchanged_bytes[proto].append(int(run_params[4]))
-        durations[proto].append(float(run_params[3]))
-        hops[proto].append(int(run_params[2]))
-
-    for proto, b in exchanged_bytes.items():
-        ax[0].plot(dissimilarity, b, marker="o", label=proto)
-
-    for proto, d in durations.items():
-        ax[1].plot(dissimilarity, d, marker="o", label=proto)
-
-    for proto, h in hops.items():
-        print(f"{proto} avg. {np.mean(h)} hops")
+        durations = np.array([v[1] for v in metrics], dtype=np.float64)
+        ax[1].plot(similarity, durations, marker="o", label=proto)
 
     # Print the labels for each proto before finish
     ax[0].legend(loc="lower right", fontsize="small")
     ax[1].legend(loc="lower right", fontsize="small")
 
-    # Save the file to an appropriate folder
-    plots = Path("plots/")
-    plots.mkdir(parents=True, exist_ok=True)
-
-    plt.savefig(plots / "xp.pdf", dpi=600)
-
+    plt.show()
 
 if __name__ == "__main__":
     main()
