@@ -42,11 +42,6 @@ where
     pub fn bitslice(&self) -> &BitSlice {
         &self.base
     }
-
-    #[inline]
-    pub fn hashers(&self) -> &[RandomState] {
-        &self.hashers
-    }
 }
 
 impl<T> BloomFilter<T>
