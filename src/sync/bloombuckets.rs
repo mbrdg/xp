@@ -92,7 +92,8 @@ impl Protocol for BloomBuckets {
                 .iter()
                 .map(<BloomBuckets as Protocol>::size_of)
                 .sum::<usize>()
-                + Bloomer::size_of(&remote_filter),
+                + Bloomer::size_of(&remote_filter)
+                + mem::size_of_val(remote_hashes.as_slice()),
         ));
 
         // 3. Compute the buckets whose hash does not match on the local replica and send those
