@@ -2,85 +2,112 @@
 # Plots the data gathered from experiements
 
 import argparse
-from collections import defaultdict
-from cycler import cycler
+from collections import defaultdict, namedtuple
 import fileinput
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib import ticker
 
-COLORS = ["#0173B2", "#DE8F05", "#029E73", "#D55E00", "#CC78BC",
-          "#CA9161", "#FBAFE4", "#949494", "#ECE133", "#56B4E9"]
+Exp = namedtuple("Exp", ["data", "download", "upload"])
+
+similarity = np.arange(0, 101, 10)
+percent_formatter = ticker.PercentFormatter()
+byte_formatter = ticker.EngFormatter(unit="B")
 
 
-def main() -> None:
+def read_experiment(input: fileinput.FileInput, expected_data_points: int = 11) -> Exp:
+    """
+    Reads experiments from the input source.
+
+    The input is assumed to be formatted with the following columns separated by whitespaces.
+    > protocol | locsz | rmtsz | download | upload | transferred | duration
+    """
+    data = defaultdict(list)
+    upload = None
+    download = None
+
+    while parts := input.readline().rstrip().split(maxsplit=6):
+        # Read values for the links
+        if download is None or upload is None:
+            download = int(parts[3])
+            upload = int(parts[4])
+
+        assert download == int(parts[3]) and upload == int(parts[4])
+        data[parts[0]].append((int(parts[5]), float(parts[6])))
+
+    assert download is not None and upload is not None
+    assert all(len(v) == expected_data_points for v in data.values())
+    return Exp(data, download, upload)
+
+
+def plot_transferred_bytes_with_similarity(experiment: Exp):
+    """Produce the plot containing the bytes transferred between similar replicas"""
+    _, ax = plt.subplots(layout="constrained")
+
+    ax.xaxis.set_major_formatter(percent_formatter)
+    ax.yaxis.set_major_formatter(byte_formatter)
+    ax.grid(linestyle="--", linewidth=0.5)
+    ax.set(xlabel="Similarity Ratio", xmargin=0, ylabel="Transferred")
+
+    for protocol, metrics in experiment.data.items():
+        transferred = np.array([v[0] for v in metrics], dtype=np.uint64)
+        ax.plot(similarity, transferred, marker="o", label=protocol)
+
+    ax.legend(fontsize="x-small")
+    plt.show()
+
+
+def plot_time_to_sync_with_similarity(experiments: tuple[Exp, Exp, Exp]):
+    """Produce the plot containing the sync times among different bandwidths for similar replicas"""
+    _, axes = plt.subplots(1, 3, figsize=(6.4 * 3, 4.8), layout="constrained")
+
+    for exp, ax in zip(experiments, axes):
+        upload = byte_formatter(exp.upload)
+        download = byte_formatter(exp.download)
+        label = f"Sync Time (s)\n{upload}/s up, {download}/s down"
+
+        ax.xaxis.set_major_formatter(percent_formatter)
+        ax.grid(linestyle="--", linewidth=0.5)
+        ax.set(xlabel="Similarity Ratio", xmargin=0, ylabel=label)
+
+        for protocol, metrics in exp.data.items():
+            sync_time = np.array([v[1] for v in metrics], dtype=np.float64)
+            ax.plot(similarity, sync_time, marker="o", label=protocol)
+
+        ax.legend(fontsize="x-small")
+
+    plt.show()
+
+
+def main():
+    """Script that extracts relevant data from logs and produces the plots for each experiment"""
     parser = argparse.ArgumentParser(prog="plotter")
     parser.add_argument("filename", nargs="?", default="-")
     args = parser.parse_args()
 
     # Set global configs for plotting
-    plt.style.use("seaborn-v0_8-paper")
+    plt.style.use("seaborn-v0_8-colorblind")
     plt.rc("font", family="serif")
-    plt.rc("axes", prop_cycle=cycler("color", COLORS))
 
     # File reading
-    with fileinput.input(files=args.filename) as f:
-        # Ignore the the line containing the seed
-        _ = f.readline()
+    with fileinput.input(files=args.filename) as input:
+        # Ignore the the line containing the seed and the next empty line
+        _ = input.readline()
+        _ = input.readline()
 
-        # Read the data for the experiment with similar replicas and symmetric channels
-        data = defaultdict(list)
-        download, upload = None, None
-        while line := f.readline():
-            parts = line.rstrip().split(maxsplit=6)
+        # Replicas with similarity
+        sim_eq = read_experiment(input)
+        assert sim_eq.upload == sim_eq.download
 
-            # read the values for the links
-            if download is None or upload is None:
-                download, upload = int(parts[3]), int(parts[4])
-            assert download == int(parts[3]) and upload == int(parts[4])
+        sim_lt = read_experiment(input)
+        assert sim_lt.upload < sim_lt.download
 
-            data[parts[0]].append((int(parts[5]), float(parts[6])))
+        sim_gt = read_experiment(input)
+        assert sim_gt.upload > sim_gt.download
 
-    assert download is not None and upload is not None
-    assert all(len(v) == 11 for v in data.values())
-    similarity = np.arange(0, 101, 10)[::-1]
+    plot_transferred_bytes_with_similarity(sim_eq)
+    plot_time_to_sync_with_similarity((sim_lt, sim_eq, sim_gt))
 
-    percent_formatter = ticker.PercentFormatter()
-    bytes_formatter = ticker.EngFormatter(unit="B")
-
-    figsize = (6.4 * 2, 4.8)
-    _, ax = plt.subplots(ncols=2, figsize=figsize, layout="constrained")
-
-    ax[0].xaxis.set_major_formatter(percent_formatter)
-    ax[0].yaxis.set_major_formatter(bytes_formatter)
-    ax[0].grid(linestyle="--", linewidth=0.5)
-    ax[0].set(
-        xlabel="Similarity Ratio",
-        xmargin=0,
-        ylabel="Bytes",
-    )
-
-    ax[1].xaxis.set_major_formatter(percent_formatter)
-    ax[1].grid(linestyle="--", linewidth=0.5)
-    ax[1].set(
-        xlabel="Similarity Ratio",
-        xmargin=0,
-        ylabel=f"Sync Time (s)\n{bytes_formatter(upload)}/s up, {bytes_formatter(download)}/s down",
-    )
-
-    # Actual plotting
-    for proto, metrics in data.items():
-        transferred = np.array([v[0] for v in metrics], dtype=int)
-        ax[0].plot(similarity, transferred, marker="o", label=proto)
-
-        durations = np.array([v[1] for v in metrics], dtype=np.float64)
-        ax[1].plot(similarity, durations, marker="o", label=proto)
-
-    # Print the labels for each proto before finish
-    ax[0].legend(loc="lower right", fontsize="small")
-    ax[1].legend(loc="lower right", fontsize="small")
-
-    plt.show()
 
 if __name__ == "__main__":
     main()
