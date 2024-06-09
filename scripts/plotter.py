@@ -2,27 +2,38 @@
 # Plots the data gathered from experiements
 
 import argparse
-from collections import defaultdict, namedtuple
+from collections import defaultdict
 import fileinput
+from typing import NamedTuple
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib import ticker
 
-Exp = namedtuple("Exp", ["data", "download", "upload"])
+
+class Metrics(NamedTuple):
+    transferred: int
+    duration: float
+
+
+class Experiment(NamedTuple):
+    data: dict[str, list[Metrics]]
+    download: int
+    upload: int
+
 
 similarity = np.arange(0, 101, 10)
 percent_formatter = ticker.PercentFormatter()
 byte_formatter = ticker.EngFormatter(unit="B")
 
 
-def read_experiment(input: fileinput.FileInput, expected_data_points: int = 11) -> Exp:
+def read_experiment(input: fileinput.FileInput, *, data_points: int) -> Experiment:
     """
     Reads experiments from the input source.
 
     The input is assumed to be formatted with the following columns separated by whitespaces.
-    > protocol | locsz | rmtsz | download | upload | transferred | duration
+    > protocol | size_of_local | size_of_remote | download | upload | transferred | duration
     """
-    data = defaultdict(list)
+    data = defaultdict(list[Metrics])
     upload = None
     download = None
 
@@ -33,14 +44,14 @@ def read_experiment(input: fileinput.FileInput, expected_data_points: int = 11) 
             upload = int(parts[4])
 
         assert download == int(parts[3]) and upload == int(parts[4])
-        data[parts[0]].append((int(parts[5]), float(parts[6])))
+        data[parts[0]].append(Metrics(int(parts[5]), float(parts[6])))
 
     assert download is not None and upload is not None
-    assert all(len(v) == expected_data_points for v in data.values())
-    return Exp(data, download, upload)
+    assert all(len(v) == data_points for v in data.values())
+    return Experiment(data, download, upload)
 
 
-def plot_transferred_bytes_with_similarity(experiment: Exp):
+def plot_similar_transferred(experiment: Experiment):
     """Produce the plot containing the bytes transferred between similar replicas"""
     _, ax = plt.subplots(layout="constrained")
 
@@ -57,7 +68,7 @@ def plot_transferred_bytes_with_similarity(experiment: Exp):
     plt.show()
 
 
-def plot_time_to_sync_with_similarity(experiments: tuple[Exp, Exp, Exp]):
+def plot_similar_time(experiments: tuple[Experiment, Experiment, Experiment]):
     """Produce the plot containing the sync times among different bandwidths for similar replicas"""
     _, axes = plt.subplots(1, 3, figsize=(6.4 * 3, 4.8), layout="constrained")
 
@@ -96,17 +107,19 @@ def main():
         _ = input.readline()
 
         # Replicas with similarity
-        sim_eq = read_experiment(input)
+        data_points = np.size(similarity)
+
+        sim_eq = read_experiment(input, data_points=data_points)
         assert sim_eq.upload == sim_eq.download
 
-        sim_lt = read_experiment(input)
+        sim_lt = read_experiment(input, data_points=data_points)
         assert sim_lt.upload < sim_lt.download
 
-        sim_gt = read_experiment(input)
+        sim_gt = read_experiment(input, data_points=data_points)
         assert sim_gt.upload > sim_gt.download
 
-    plot_transferred_bytes_with_similarity(sim_eq)
-    plot_time_to_sync_with_similarity((sim_lt, sim_eq, sim_gt))
+    plot_similar_transferred(sim_eq)
+    plot_similar_time((sim_lt, sim_eq, sim_gt))
 
 
 if __name__ == "__main__":
