@@ -127,6 +127,39 @@ def main():
         sim_gt = read_experiment(input, data_points=data_points)
         assert sim_gt.upload > sim_gt.download
 
+        # Replicas with distinct cardinalities
+        # len(local) >> len(remote)
+        big_local_eq = read_experiment(input, data_points=1)
+        assert big_local_eq.upload == big_local_eq.download
+        assert big_local_eq.size_of_local is not None and big_local_eq.size_of_remote is not None
+        assert big_local_eq.size_of_local > big_local_eq.size_of_remote
+
+        big_local_lt = read_experiment(input, data_points=1)
+        assert big_local_lt.upload < big_local_lt.download
+        assert big_local_lt.size_of_local is not None and big_local_lt.size_of_remote is not None
+        assert big_local_lt.size_of_local > big_local_lt.size_of_remote
+
+        big_local_gt = read_experiment(input, data_points=1)
+        assert big_local_gt.upload > big_local_gt.download
+        assert big_local_gt.size_of_local is not None and big_local_gt.size_of_remote is not None
+        assert big_local_gt.size_of_local > big_local_gt.size_of_remote
+
+        # len(local) << len(remote)
+        big_remote_eq = read_experiment(input, data_points=1)
+        assert big_remote_eq.upload == big_remote_eq.download
+        assert big_remote_eq.size_of_local is not None and big_remote_eq.size_of_remote is not None
+        assert big_remote_eq.size_of_local < big_remote_eq.size_of_remote
+
+        big_remote_lt = read_experiment(input, data_points=1)
+        assert big_remote_lt.upload < big_remote_lt.download
+        assert big_remote_lt.size_of_local is not None and big_remote_lt.size_of_remote is not None
+        assert big_remote_lt.size_of_local < big_remote_lt.size_of_remote
+
+        big_remote_gt = read_experiment(input, data_points=1)
+        assert big_remote_gt.upload > big_remote_gt.download
+        assert big_remote_gt.size_of_local is not None and big_remote_gt.size_of_remote is not None
+        assert big_remote_gt.size_of_local < big_remote_gt.size_of_remote
+
     plot_similar_transferred(sim_eq)
     plot_similar_time((sim_lt, sim_eq, sim_gt))
 
