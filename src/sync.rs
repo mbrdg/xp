@@ -7,7 +7,7 @@ use std::{
 
 use crate::{
     bloom::BloomFilter,
-    crdt::{Decomposable, GSet},
+    crdt::{AWSet, Decomposable, GSet},
     tracker::Tracker,
 };
 
@@ -33,9 +33,9 @@ pub struct BucketDispatcher<T> {
     _marker: PhantomData<T>,
 }
 
-impl<T> BucketDispatcher<GSet<T>>
+impl<T> BucketDispatcher<T>
 where
-    T: Clone + Eq + Hash,
+    T: Decomposable,
 {
     pub fn new(num_buckets: usize) -> Self {
         assert_ne!(num_buckets, 0, "at least one bucket should exist");
@@ -47,6 +47,24 @@ where
         }
     }
 
+    fn hashes(&self, buckets: &[Bucket<T>]) -> Vec<u64> {
+        buckets
+            .iter()
+            .map(|bucket| {
+                let id = bucket
+                    .keys()
+                    .fold(String::new(), |acc, h| format!("{acc}{h}"));
+
+                self.hasher.hash_one(id)
+            })
+            .collect()
+    }
+}
+
+impl<T> BucketDispatcher<GSet<T>>
+where
+    T: Clone + Eq + Hash,
+{
     fn dispatch(&self, replica: &GSet<T>) -> Vec<Bucket<GSet<T>>> {
         let mut buckets = vec![Bucket::new(); self.num_buckets];
 
@@ -67,21 +85,27 @@ where
     }
 }
 
-impl<T> BucketDispatcher<T>
+impl<T> BucketDispatcher<AWSet<T>>
 where
-    T: Decomposable,
+    T: Clone + Eq + Hash,
 {
-    fn hashes(&self, buckets: &[Bucket<T>]) -> Vec<u64> {
-        buckets
-            .iter()
-            .map(|bucket| {
-                let id = bucket
-                    .keys()
-                    .fold(String::new(), |acc, h| format!("{acc}{h}"));
+    fn dispatch(&self, replica: &AWSet<T>) -> Vec<Bucket<AWSet<T>>> {
+        let mut buckets = vec![Bucket::new(); self.num_buckets];
 
-                self.hasher.hash_one(id)
-            })
-            .collect()
+        replica.split().into_iter().for_each(|delta| {
+            let item = delta
+                .elements()
+                .into_iter()
+                .next()
+                .expect("a decomposition should have a single item");
+
+            let hash = self.hasher.hash_one(item);
+            let idx = usize::try_from(hash).unwrap() % buckets.len();
+
+            buckets[idx].insert(hash, delta);
+        });
+
+        buckets
     }
 }
 
@@ -150,6 +174,41 @@ where
                 .next()
                 .expect("a decomposition should have a single item");
             filter.contains(item)
+        })
+    }
+}
+
+impl<T> Bloomer<AWSet<T>>
+where
+    T: Clone + Eq + Hash,
+{
+    fn filter_from(&self, decompositions: &[AWSet<T>]) -> BloomFilter<T> {
+        let mut filter = BloomFilter::new(decompositions.len(), self.fpr);
+
+        decompositions.iter().for_each(|delta| {
+            let item = delta
+                .elements()
+                .into_iter()
+                .next()
+                .expect("a decomposition should have a single element");
+            filter.insert(&item);
+        });
+
+        filter
+    }
+
+    fn partition(
+        &self,
+        filter: &BloomFilter<T>,
+        decompositions: Vec<AWSet<T>>,
+    ) -> (Vec<AWSet<T>>, Vec<AWSet<T>>) {
+        decompositions.into_iter().partition(|delta| {
+            let item = delta
+                .elements()
+                .into_iter()
+                .next()
+                .expect("a decomposition should have a single item");
+            filter.contains(&item)
         })
     }
 }
