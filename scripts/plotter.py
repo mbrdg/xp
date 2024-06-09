@@ -11,14 +11,14 @@ from matplotlib import ticker
 
 
 class Metrics(NamedTuple):
-    transferred: int
+    transmitted: int
     duration: float
 
 
 class Experiment(NamedTuple):
     data: dict[str, list[Metrics]]
-    size_of_local: int | None
-    size_of_remote: int | None
+    avg_size_of_local: int
+    avg_size_of_remote: int
     download: int
     upload: int
 
@@ -28,7 +28,7 @@ percent_formatter = ticker.PercentFormatter()
 byte_formatter = ticker.EngFormatter(unit="B", places=2)
 
 
-def read_experiment(input: fileinput.FileInput, *, data_points: int) -> Experiment:
+def read_experiment(input: fileinput.FileInput) -> Experiment:
     """
     Reads experiments from the input source.
 
@@ -36,15 +36,15 @@ def read_experiment(input: fileinput.FileInput, *, data_points: int) -> Experime
     > protocol | size_of_local | size_of_remote | download | upload | transferred | duration
     """
     data = defaultdict(list[Metrics])
-    upload, download, size_of_local, size_of_remote = None, None, None, None
+    sizes_of_local = []
+    sizes_of_remote = []
+    upload = None
+    download = None
 
     while parts := input.readline().rstrip().split(maxsplit=6):
         # Read the replica sizes
-        if data_points == 1:
-            if size_of_local is None or size_of_remote is None:
-                size_of_local = int(parts[1])
-                size_of_remote = int(parts[2])
-            assert size_of_local == int(parts[1]) and size_of_remote == int(parts[2])
+        sizes_of_local.append(int(parts[1]))
+        sizes_of_remote.append(int(parts[2]))
 
         # Read values for the links
         if download is None or upload is None:
@@ -53,45 +53,31 @@ def read_experiment(input: fileinput.FileInput, *, data_points: int) -> Experime
         assert download == int(parts[3]) and upload == int(parts[4])
 
         # Collect relevant metrics
-        data[parts[0]].append(Metrics(int(parts[5]), float(parts[6])))
+        metrics = Metrics(int(parts[5]), float(parts[6]))
+        data[parts[0]].append(metrics)
 
     assert download is not None and upload is not None
-    assert all(len(v) == data_points for v in data.values())
-    return Experiment(data, size_of_local, size_of_remote, download, upload)
+    assert all(len(v) == np.size(similarity) for v in data.values())
+
+    avg_size_of_local = int(sum(sizes_of_local) / len(sizes_of_local))
+    avg_size_of_remote = int(sum(sizes_of_remote) / len(sizes_of_remote))
+    return Experiment(data, avg_size_of_local, avg_size_of_remote, download, upload)
 
 
-def plot_similar_transferred(experiment: Experiment):
+def plot_transmitted(experiment: Experiment):
     """Produce the plot containing the bytes transferred between similar replicas"""
     _, ax = plt.subplots(layout="constrained")
 
     ax.xaxis.set_major_formatter(percent_formatter)
     ax.yaxis.set_major_formatter(byte_formatter)
-    ax.grid(linestyle="--", linewidth=0.5)
-    ax.set(xlabel="Similarity Ratio", xmargin=0, ylabel="Transferred (Bytes)")
+    ax.grid(linestyle="--", linewidth=.5, alpha=.5)
+    ax.set(xlabel="Similarity Ratio", xmargin=0, ylabel="Transmitted (Bytes)")
 
     for protocol, metrics in experiment.data.items():
-        transferred = np.array([v.transferred for v in metrics], dtype=np.uint64)
-        ax.plot(similarity, transferred, marker="o", label=protocol)
+        transmitted = np.array([v.transmitted for v in metrics], dtype=np.uint64)
+        ax.plot(similarity, transmitted, marker="o", label=protocol)
 
     ax.legend(fontsize="x-small")
-    plt.show()
-
-
-def plot_distinct_transferred(experiment: Experiment):
-    _, ax = plt.subplots(layout="constrained")
-
-    ax.yaxis.set_major_formatter(byte_formatter)
-    ax.yaxis.grid(linestyle="--", linewidth=0.5, alpha=0.5)
-    ax.xaxis.set_tick_params(labelsize="small")
-    ax.set(xmargin=0.025, ylabel="Transferred (Bytes)")
-
-    protocols = [p.replace("<", "\n").removesuffix(">") for p in experiment.data.keys()]
-    transferred = np.array([m[0].transferred for m in experiment.data.values()])
-    labels = [byte_formatter(m[0].transferred) for m in experiment.data.values()]
-
-    bars = ax.bar(protocols, transferred)
-    ax.bar_label(bars, labels, fontsize="small")
-
     plt.show()
 
 
@@ -105,20 +91,16 @@ def plot_similar_time(experiments: tuple[Experiment, Experiment, Experiment]):
         label = f"Sync Time (s)\n{upload}/s up, {download}/s down"
 
         ax.xaxis.set_major_formatter(percent_formatter)
-        ax.grid(linestyle="--", linewidth=0.5)
+        ax.grid(linestyle="--", linewidth=.5, alpha=.5)
         ax.set(xlabel="Similarity Ratio", xmargin=0, ylabel=label)
 
         for protocol, metrics in exp.data.items():
-            sync_time = np.array([v[1] for v in metrics], dtype=np.float64)
+            sync_time = np.array([v.duration for v in metrics], dtype=np.float64)
             ax.plot(similarity, sync_time, marker="o", label=protocol)
 
         ax.legend(fontsize="x-small")
 
     plt.show()
-
-
-def plot_distinct_time(experiments: tuple[Experiment, Experiment, Experiment, Experiment, Experiment, Experiment]):
-    raise NotImplementedError
 
 
 def main():
@@ -138,55 +120,15 @@ def main():
         _ = input.readline()
 
         # Replicas with similarity
-        data_points = np.size(similarity)
+        gsets_eq = read_experiment(input)
+        assert gsets_eq.upload == gsets_eq.download, gsets_eq
+        gsets_lt = read_experiment(input)
+        assert gsets_lt.upload < gsets_lt.download, gsets_lt
+        gsets_gt = read_experiment(input)
+        assert gsets_gt.upload > gsets_gt.download, gsets_gt
 
-        sim_eq = read_experiment(input, data_points=data_points)
-        assert sim_eq.upload == sim_eq.download
-
-        sim_lt = read_experiment(input, data_points=data_points)
-        assert sim_lt.upload < sim_lt.download
-
-        sim_gt = read_experiment(input, data_points=data_points)
-        assert sim_gt.upload > sim_gt.download
-
-        # Replicas with distinct cardinalities
-        # len(local) >> len(remote)
-        big_local_eq = read_experiment(input, data_points=1)
-        assert big_local_eq.upload == big_local_eq.download
-        assert big_local_eq.size_of_local is not None and big_local_eq.size_of_remote is not None
-        assert big_local_eq.size_of_local > big_local_eq.size_of_remote
-
-        big_local_lt = read_experiment(input, data_points=1)
-        assert big_local_lt.upload < big_local_lt.download
-        assert big_local_lt.size_of_local is not None and big_local_lt.size_of_remote is not None
-        assert big_local_lt.size_of_local > big_local_lt.size_of_remote
-
-        big_local_gt = read_experiment(input, data_points=1)
-        assert big_local_gt.upload > big_local_gt.download
-        assert big_local_gt.size_of_local is not None and big_local_gt.size_of_remote is not None
-        assert big_local_gt.size_of_local > big_local_gt.size_of_remote
-
-        # len(local) << len(remote)
-        big_remote_eq = read_experiment(input, data_points=1)
-        assert big_remote_eq.upload == big_remote_eq.download
-        assert big_remote_eq.size_of_local is not None and big_remote_eq.size_of_remote is not None
-        assert big_remote_eq.size_of_local < big_remote_eq.size_of_remote
-
-        big_remote_lt = read_experiment(input, data_points=1)
-        assert big_remote_lt.upload < big_remote_lt.download
-        assert big_remote_lt.size_of_local is not None and big_remote_lt.size_of_remote is not None
-        assert big_remote_lt.size_of_local < big_remote_lt.size_of_remote
-
-        big_remote_gt = read_experiment(input, data_points=1)
-        assert big_remote_gt.upload > big_remote_gt.download
-        assert big_remote_gt.size_of_local is not None and big_remote_gt.size_of_remote is not None
-        assert big_remote_gt.size_of_local < big_remote_gt.size_of_remote
-
-    plot_similar_transferred(sim_eq)
-    plot_similar_time((sim_lt, sim_eq, sim_gt))
-
-    plot_distinct_transferred(big_local_eq)
-    # plot_distinct_time((big_local_lt, big_local_eq, big_local_gt, big_remote_lt, big_remote_eq, big_remote_gt))
+    plot_transmitted(gsets_eq)
+    plot_similar_time((gsets_lt, gsets_eq, gsets_gt))
 
 
 if __name__ == "__main__":
