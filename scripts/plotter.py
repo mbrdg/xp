@@ -17,6 +17,8 @@ class Metrics(NamedTuple):
 
 class Experiment(NamedTuple):
     data: dict[str, list[Metrics]]
+    size_of_local: int | None
+    size_of_remote: int | None
     download: int
     upload: int
 
@@ -34,21 +36,28 @@ def read_experiment(input: fileinput.FileInput, *, data_points: int) -> Experime
     > protocol | size_of_local | size_of_remote | download | upload | transferred | duration
     """
     data = defaultdict(list[Metrics])
-    upload = None
-    download = None
+    upload, download, size_of_local, size_of_remote = None, None, None, None
 
     while parts := input.readline().rstrip().split(maxsplit=6):
+        # Read the replica sizes
+        if data_points == 1:
+            if size_of_local is None or size_of_remote is None:
+                size_of_local = int(parts[1])
+                size_of_remote = int(parts[2])
+            assert size_of_local == int(parts[1]) and size_of_remote == int(parts[2])
+
         # Read values for the links
         if download is None or upload is None:
             download = int(parts[3])
             upload = int(parts[4])
-
         assert download == int(parts[3]) and upload == int(parts[4])
+
+        # Collect relevant metrics
         data[parts[0]].append(Metrics(int(parts[5]), float(parts[6])))
 
     assert download is not None and upload is not None
     assert all(len(v) == data_points for v in data.values())
-    return Experiment(data, download, upload)
+    return Experiment(data, size_of_local, size_of_remote, download, upload)
 
 
 def plot_similar_transferred(experiment: Experiment):
