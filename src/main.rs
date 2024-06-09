@@ -1,7 +1,7 @@
 #![allow(dead_code)]
 
 use std::{
-    any,
+    any, mem,
     ops::Range,
     time::{Duration, Instant},
 };
@@ -26,22 +26,7 @@ mod crdt;
 mod sync;
 mod tracker;
 
-fn populate_gset(cardinality: usize, lengths: Range<usize>, rng: &mut StdRng) -> GSet<String> {
-    let mut replica = GSet::new();
-
-    Uniform::from(lengths)
-        .sample_iter(rng.clone())
-        .map(|len| Alphanumeric.sample_string(rng, len))
-        .take(cardinality)
-        .for_each(|item| {
-            replica.insert(item);
-        });
-
-    assert_eq!(cardinality, replica.len());
-    replica
-}
-
-fn populate_similar_gsets(
+fn spawn_similar_gsets(
     cardinality: usize,
     lengths: Range<usize>,
     similarity: f64,
@@ -100,6 +85,25 @@ fn populate_similar_gsets(
     gsets
 }
 
+fn spawn_distinct_gset(
+    cardinality: usize,
+    lengths: Range<usize>,
+    rng: &mut StdRng,
+) -> GSet<String> {
+    let mut replica = GSet::new();
+
+    Uniform::from(lengths)
+        .sample_iter(rng.clone())
+        .map(|len| Alphanumeric.sample_string(rng, len))
+        .take(cardinality)
+        .for_each(|item| {
+            replica.insert(item);
+        });
+
+    assert_eq!(cardinality, replica.len());
+    replica
+}
+
 #[derive(Debug)]
 struct ReplicaStatus {
     size: usize,
@@ -121,16 +125,10 @@ fn run<P>(
         "similarity should be a ratio between 0.0 and 1.0"
     );
 
-    let ReplicaStatus {
-        size: size_of_local,
-        bandwidth: upload,
-    } = local;
-    let ReplicaStatus {
-        size: size_of_remote,
-        bandwidth: download,
-    } = remote;
+    let (size_of_local, upload) = (local.size, local.bandwidth);
+    let (size_of_remote, download) = (remote.size, remote.bandwidth);
 
-    let mut tracker = DefaultTracker::new(*download, *upload);
+    let mut tracker = DefaultTracker::new(download, upload);
     protocol.sync(&mut tracker);
 
     let type_name = {
@@ -155,8 +153,8 @@ fn run<P>(
     );
 }
 
-type ExperimentReplicas<T> = Vec<(f64, (T, ReplicaStatus), (T, ReplicaStatus))>;
-fn exec(replicas: &ExperimentReplicas<GSet<String>>) {
+type SimilarReplicas<T> = Vec<(f64, (T, ReplicaStatus), (T, ReplicaStatus))>;
+fn exec_similar(replicas: &SimilarReplicas<GSet<String>>) {
     // Baseline
     replicas.iter().for_each(|(s, local, remote)| {
         let mut protocol = Baseline::new(local.0.clone(), remote.0.clone());
@@ -171,7 +169,7 @@ fn exec(replicas: &ExperimentReplicas<GSet<String>>) {
     });
 
     // Buckets<1.0>
-    // NOTE: A Bucket with a `loading_factor` of 1.0 is the default.
+    // NOTE: A Bucket with a `load_factor` of 1.0 is the default.
     replicas.iter().for_each(|(s, local, remote)| {
         let mut protocol = Buckets::new(local.0.clone(), remote.0.clone());
         run(&mut protocol, Some("lf=1.0"), *s, &local.1, &remote.1);
@@ -179,19 +177,19 @@ fn exec(replicas: &ExperimentReplicas<GSet<String>>) {
 
     // Buckets<5.0>
     replicas.iter().for_each(|(s, local, remote)| {
-        let dispatcher = BucketDispatcher::new((5.0 * local.0.len() as f64) as usize);
+        let dispatcher = BucketDispatcher::new(5 * local.0.len());
         let mut protocol = Buckets::with_dispatcher(local.0.clone(), remote.0.clone(), dispatcher);
         run(&mut protocol, Some("lf=5.0"), *s, &local.1, &remote.1);
     });
 
-    // Buckets<1.0, 0.01>
+    // BloomBuckets<1.0, 0.01>
     // NOTE: A bucket with load_factor` of 1.0 and a false positive rate of 1% are the defaults.
     replicas.iter().for_each(|(s, local, remote)| {
         let mut protocol = BloomBuckets::new(local.0.clone(), remote.0.clone());
         run(&mut protocol, Some("fpr=1%"), *s, &local.1, &remote.1);
     });
 
-    // Buckets<1.0, 0.025>
+    // BloomBuckets<1.0, 0.025>
     replicas.iter().for_each(|(s, local, remote)| {
         let bloomer = Bloomer::new(0.05);
         let mut protocol = BloomBuckets::with_bloomer(local.0.clone(), remote.0.clone(), bloomer);
@@ -199,6 +197,48 @@ fn exec(replicas: &ExperimentReplicas<GSet<String>>) {
     });
 }
 
+type DistinctReplicas<T> = ((T, ReplicaStatus), (T, ReplicaStatus));
+fn exec_distinct(replicas: &DistinctReplicas<GSet<String>>) {
+    let (local, remote) = replicas;
+
+    // Baseline
+    let mut protocol = Baseline::new(local.0.clone(), remote.0.clone());
+    run(&mut protocol, None, 0.0, &local.1, &remote.1);
+
+    // Buckets<0.2>
+    let dispatcher = BucketDispatcher::new((0.2 * local.0.len() as f64) as usize);
+    let mut protocol = Buckets::with_dispatcher(local.0.clone(), remote.0.clone(), dispatcher);
+    run(&mut protocol, Some("lf=0.2"), 0.0, &local.1, &remote.1);
+
+    // Buckets<1.0>
+    // NOTE: A Bucket with a `load_factor` of 1.0 is the default.
+    let mut protocol = Buckets::new(local.0.clone(), remote.0.clone());
+    run(&mut protocol, Some("lf=1.0"), 0.0, &local.1, &remote.1);
+
+    // Buckets<5.0>
+    let dispatcher = BucketDispatcher::new(5 * local.0.len());
+    let mut protocol = Buckets::with_dispatcher(local.0.clone(), remote.0.clone(), dispatcher);
+    run(&mut protocol, Some("lf=5.0"), 0.0, &local.1, &remote.1);
+
+    // BloomBuckets<1.0, 0.01>
+    // NOTE: A bucket with load_factor` of 1.0 and a false positive rate of 1% are the defaults.
+    let mut protocol = BloomBuckets::new(local.0.clone(), remote.0.clone());
+    run(&mut protocol, Some("fpr=1%"), 0.0, &local.1, &remote.1);
+
+    // BloomBuckets<1.0, 0.05>
+    let bloomer = Bloomer::new(0.05);
+    let mut protocol = BloomBuckets::with_bloomer(local.0.clone(), remote.0.clone(), bloomer);
+    run(&mut protocol, Some("fpr=5%"), 0.0, &local.1, &remote.1);
+}
+
+/// Entry point for the execution of the experiments.
+///
+/// The first experiment is on similar uses replica with the same cardinality and a given degree of
+/// similarity. Furthermore, we repeat this experiment on different link configurations with both
+/// symmetric and assymetric channels.
+///
+/// The second experiment is on replicas of distinct cardinalities, also with different link
+/// configurations, again, with both symmetric and asymmetric channels.
 fn main() {
     let execution_time = Instant::now();
 
@@ -206,13 +246,11 @@ fn main() {
     let mut rng = StdRng::seed_from_u64(seed);
     println!("seed={seed}");
 
-    // First experiment - symmetric channels and similar cardinality
-    // Replica setup
-    let mut similar_replicas = (0..=100)
+    let mut replicas = (0..=100)
         .step_by(10)
         .map(|s| {
             let similarity = f64::from(s) / 100.0;
-            let (local, remote) = populate_similar_gsets(100_000, 50..80, similarity, &mut rng);
+            let (local, remote) = spawn_similar_gsets(100_000, 50..80, similarity, &mut rng);
 
             let local_status = ReplicaStatus {
                 size: local.elements().iter().map(String::len).sum(),
@@ -230,10 +268,10 @@ fn main() {
 
     // Upload == Download
     println!();
-    exec(&similar_replicas);
+    exec_similar(&replicas);
 
     // Upload << Download
-    similar_replicas
+    replicas
         .iter_mut()
         .for_each(|(_, (_, local_status), (_, remote_status))| {
             local_status.bandwidth = NetworkBandwitdth::Mbps(1.0);
@@ -241,10 +279,10 @@ fn main() {
         });
 
     println!();
-    exec(&similar_replicas);
+    exec_similar(&replicas);
 
     // Upload >> Download
-    similar_replicas
+    replicas
         .iter_mut()
         .for_each(|(_, (_, local_status), (_, remote_status))| {
             local_status.bandwidth = NetworkBandwitdth::Mbps(10.0);
@@ -252,7 +290,81 @@ fn main() {
         });
 
     println!();
-    exec(&similar_replicas);
+    exec_similar(&replicas);
+
+    // Second Experiment - Different cardinalities
+    // |local| >> |remote|
+    let mut replicas = {
+        let local_replica = spawn_distinct_gset(100_000, 50..80, &mut rng);
+        let local_status = ReplicaStatus {
+            size: local_replica.elements().iter().map(String::len).sum(),
+            bandwidth: NetworkBandwitdth::Mbps(10.0),
+        };
+
+        let remote_replica = spawn_distinct_gset(10_000, 50..80, &mut rng);
+        let remote_status = ReplicaStatus {
+            size: remote_replica.elements().iter().map(String::len).sum(),
+            bandwidth: NetworkBandwitdth::Mbps(10.0),
+        };
+
+        assert_eq!(
+            local_replica
+                .elements()
+                .intersection(remote_replica.elements())
+                .count(),
+            0
+        );
+
+        (
+            (local_replica, local_status),
+            (remote_replica, remote_status),
+        )
+    };
+
+    // Upload == Download
+    println!();
+    exec_distinct(&replicas);
+
+    // Upload << Download
+    replicas.0 .1.bandwidth = NetworkBandwitdth::Mbps(1.0);
+    replicas.1 .1.bandwidth = NetworkBandwitdth::Mbps(10.0);
+
+    println!();
+    exec_distinct(&replicas);
+
+    // Upload >> Download
+    replicas.0 .1.bandwidth = NetworkBandwitdth::Mbps(10.0);
+    replicas.1 .1.bandwidth = NetworkBandwitdth::Mbps(1.0);
+
+    println!();
+    exec_distinct(&replicas);
+
+    // |local| << |remote|
+    let (size_of_local, size_of_remote) = (replicas.0 .1.size, replicas.1 .1.size);
+    mem::swap(&mut replicas.0, &mut replicas.1);
+    assert_eq!(replicas.0 .1.size, size_of_remote);
+    assert_eq!(replicas.1 .1.size, size_of_local);
+
+    // Upload == Download
+    replicas.0 .1.bandwidth = NetworkBandwitdth::Mbps(10.0);
+    replicas.1 .1.bandwidth = NetworkBandwitdth::Mbps(10.0);
+
+    println!();
+    exec_distinct(&replicas);
+
+    // Upload << Download
+    replicas.0 .1.bandwidth = NetworkBandwitdth::Mbps(1.0);
+    replicas.1 .1.bandwidth = NetworkBandwitdth::Mbps(10.0);
+
+    println!();
+    exec_distinct(&replicas);
+
+    // Upload >> Download
+    replicas.0 .1.bandwidth = NetworkBandwitdth::Mbps(10.0);
+    replicas.1 .1.bandwidth = NetworkBandwitdth::Mbps(1.0);
+
+    println!();
+    exec_distinct(&replicas);
 
     eprintln!("time elapsed: {:.3?}", execution_time.elapsed());
 }
