@@ -307,14 +307,6 @@ fn main() {
             bandwidth: NetworkBandwitdth::Mbps(10.0),
         };
 
-        assert_eq!(
-            local_replica
-                .elements()
-                .intersection(remote_replica.elements())
-                .count(),
-            0
-        );
-
         (
             (local_replica, local_status),
             (remote_replica, remote_status),

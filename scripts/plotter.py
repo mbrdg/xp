@@ -25,7 +25,7 @@ class Experiment(NamedTuple):
 
 similarity = np.arange(0, 101, 10)
 percent_formatter = ticker.PercentFormatter()
-byte_formatter = ticker.EngFormatter(unit="B")
+byte_formatter = ticker.EngFormatter(unit="B", places=2)
 
 
 def read_experiment(input: fileinput.FileInput, *, data_points: int) -> Experiment:
@@ -67,13 +67,31 @@ def plot_similar_transferred(experiment: Experiment):
     ax.xaxis.set_major_formatter(percent_formatter)
     ax.yaxis.set_major_formatter(byte_formatter)
     ax.grid(linestyle="--", linewidth=0.5)
-    ax.set(xlabel="Similarity Ratio", xmargin=0, ylabel="Transferred")
+    ax.set(xlabel="Similarity Ratio", xmargin=0, ylabel="Transferred (Bytes)")
 
     for protocol, metrics in experiment.data.items():
-        transferred = np.array([v[0] for v in metrics], dtype=np.uint64)
+        transferred = np.array([v.transferred for v in metrics], dtype=np.uint64)
         ax.plot(similarity, transferred, marker="o", label=protocol)
 
     ax.legend(fontsize="x-small")
+    plt.show()
+
+
+def plot_distinct_transferred(experiment: Experiment):
+    _, ax = plt.subplots(layout="constrained")
+
+    ax.yaxis.set_major_formatter(byte_formatter)
+    ax.yaxis.grid(linestyle="--", linewidth=0.5, alpha=0.5)
+    ax.xaxis.set_tick_params(labelsize="small")
+    ax.set(xmargin=0.025, ylabel="Transferred (Bytes)")
+
+    protocols = [p.replace("<", "\n").removesuffix(">") for p in experiment.data.keys()]
+    transferred = np.array([m[0].transferred for m in experiment.data.values()])
+    labels = [byte_formatter(m[0].transferred) for m in experiment.data.values()]
+
+    bars = ax.bar(protocols, transferred)
+    ax.bar_label(bars, labels, fontsize="small")
+
     plt.show()
 
 
@@ -97,6 +115,10 @@ def plot_similar_time(experiments: tuple[Experiment, Experiment, Experiment]):
         ax.legend(fontsize="x-small")
 
     plt.show()
+
+
+def plot_distinct_time(experiments: tuple[Experiment, Experiment, Experiment, Experiment, Experiment, Experiment]):
+    raise NotImplementedError
 
 
 def main():
@@ -162,6 +184,9 @@ def main():
 
     plot_similar_transferred(sim_eq)
     plot_similar_time((sim_lt, sim_eq, sim_gt))
+
+    plot_distinct_transferred(big_local_eq)
+    # plot_distinct_time((big_local_lt, big_local_eq, big_local_gt, big_remote_lt, big_remote_eq, big_remote_gt))
 
 
 if __name__ == "__main__":
