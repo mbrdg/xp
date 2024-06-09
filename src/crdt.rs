@@ -2,6 +2,7 @@ use std::{
     cmp::max,
     collections::{HashMap, HashSet},
     hash::Hash,
+    mem,
 };
 
 pub trait Decomposable {
@@ -10,6 +11,10 @@ pub trait Decomposable {
     fn split(&self) -> Vec<Self::Decomposition>;
     fn join(&mut self, deltas: Vec<Self::Decomposition>);
     fn difference(&self, remote: &Self::Decomposition) -> Self::Decomposition;
+}
+
+pub trait Measurable {
+    fn size_of(&self) -> usize;
 }
 
 #[derive(Clone, Debug, Default)]
@@ -90,6 +95,12 @@ where
         Self {
             base: self.base.difference(&remote.base).cloned().collect(),
         }
+    }
+}
+
+impl Measurable for GSet<String> {
+    fn size_of(&self) -> usize {
+        self.base.iter().map(String::len).sum()
     }
 }
 
@@ -325,7 +336,7 @@ where
 
 impl<T> AWSet<T>
 where
-    T: Eq + Hash + Clone,
+    T: Clone + Eq + Hash,
 {
     #[inline]
     #[must_use]
@@ -416,6 +427,14 @@ where
                 .collect(),
             removed: self.removed.difference(&remote.removed).cloned().collect(),
         }
+    }
+}
+
+impl Measurable for AWSet<String> {
+    fn size_of(&self) -> usize {
+        self.inserted.len() * mem::size_of::<u64>()
+            + self.removed.len() * mem::size_of::<u64>()
+            + self.inserted.values().map(String::len).sum::<usize>()
     }
 }
 
