@@ -197,40 +197,6 @@ fn exec_similar(replicas: &SimilarReplicas<GSet<String>>) {
     });
 }
 
-type DistinctReplicas<T> = ((T, ReplicaStatus), (T, ReplicaStatus));
-fn exec_distinct(replicas: &DistinctReplicas<GSet<String>>) {
-    let (local, remote) = replicas;
-
-    // Baseline
-    let mut protocol = Baseline::new(local.0.clone(), remote.0.clone());
-    run(&mut protocol, None, 0.0, &local.1, &remote.1);
-
-    // Buckets<0.2>
-    let dispatcher = BucketDispatcher::new((0.2 * local.0.len() as f64) as usize);
-    let mut protocol = Buckets::with_dispatcher(local.0.clone(), remote.0.clone(), dispatcher);
-    run(&mut protocol, Some("lf=0.2"), 0.0, &local.1, &remote.1);
-
-    // Buckets<1.0>
-    // NOTE: A Bucket with a `load_factor` of 1.0 is the default.
-    let mut protocol = Buckets::new(local.0.clone(), remote.0.clone());
-    run(&mut protocol, Some("lf=1.0"), 0.0, &local.1, &remote.1);
-
-    // Buckets<5.0>
-    let dispatcher = BucketDispatcher::new(5 * local.0.len());
-    let mut protocol = Buckets::with_dispatcher(local.0.clone(), remote.0.clone(), dispatcher);
-    run(&mut protocol, Some("lf=5.0"), 0.0, &local.1, &remote.1);
-
-    // BloomBuckets<1.0, 0.01>
-    // NOTE: A bucket with load_factor` of 1.0 and a false positive rate of 1% are the defaults.
-    let mut protocol = BloomBuckets::new(local.0.clone(), remote.0.clone());
-    run(&mut protocol, Some("fpr=1%"), 0.0, &local.1, &remote.1);
-
-    // BloomBuckets<1.0, 0.05>
-    let bloomer = Bloomer::new(0.05);
-    let mut protocol = BloomBuckets::with_bloomer(local.0.clone(), remote.0.clone(), bloomer);
-    run(&mut protocol, Some("fpr=5%"), 0.0, &local.1, &remote.1);
-}
-
 /// Entry point for the execution of the experiments.
 ///
 /// The first experiment is on similar uses replica with the same cardinality and a given degree of
@@ -291,72 +257,6 @@ fn main() {
 
     println!();
     exec_similar(&replicas);
-
-    // Second Experiment - Different cardinalities
-    // |local| >> |remote|
-    let mut replicas = {
-        let local_replica = spawn_distinct_gset(100_000, 50..80, &mut rng);
-        let local_status = ReplicaStatus {
-            size: local_replica.elements().iter().map(String::len).sum(),
-            bandwidth: NetworkBandwitdth::Mbps(10.0),
-        };
-
-        let remote_replica = spawn_distinct_gset(10_000, 50..80, &mut rng);
-        let remote_status = ReplicaStatus {
-            size: remote_replica.elements().iter().map(String::len).sum(),
-            bandwidth: NetworkBandwitdth::Mbps(10.0),
-        };
-
-        (
-            (local_replica, local_status),
-            (remote_replica, remote_status),
-        )
-    };
-
-    // Upload == Download
-    println!();
-    exec_distinct(&replicas);
-
-    // Upload << Download
-    replicas.0 .1.bandwidth = NetworkBandwitdth::Mbps(1.0);
-    replicas.1 .1.bandwidth = NetworkBandwitdth::Mbps(10.0);
-
-    println!();
-    exec_distinct(&replicas);
-
-    // Upload >> Download
-    replicas.0 .1.bandwidth = NetworkBandwitdth::Mbps(10.0);
-    replicas.1 .1.bandwidth = NetworkBandwitdth::Mbps(1.0);
-
-    println!();
-    exec_distinct(&replicas);
-
-    // |local| << |remote|
-    let (size_of_local, size_of_remote) = (replicas.0 .1.size, replicas.1 .1.size);
-    mem::swap(&mut replicas.0, &mut replicas.1);
-    assert_eq!(replicas.0 .1.size, size_of_remote);
-    assert_eq!(replicas.1 .1.size, size_of_local);
-
-    // Upload == Download
-    replicas.0 .1.bandwidth = NetworkBandwitdth::Mbps(10.0);
-    replicas.1 .1.bandwidth = NetworkBandwitdth::Mbps(10.0);
-
-    println!();
-    exec_distinct(&replicas);
-
-    // Upload << Download
-    replicas.0 .1.bandwidth = NetworkBandwitdth::Mbps(1.0);
-    replicas.1 .1.bandwidth = NetworkBandwitdth::Mbps(10.0);
-
-    println!();
-    exec_distinct(&replicas);
-
-    // Upload >> Download
-    replicas.0 .1.bandwidth = NetworkBandwitdth::Mbps(10.0);
-    replicas.1 .1.bandwidth = NetworkBandwitdth::Mbps(1.0);
-
-    println!();
-    exec_distinct(&replicas);
 
     eprintln!("time elapsed: {:.3?}", execution_time.elapsed());
 }
