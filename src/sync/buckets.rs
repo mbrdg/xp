@@ -1,51 +1,35 @@
 use std::{collections::HashMap, iter::zip, mem};
 
 use crate::{
-    crdt::{Decomposable, GSet},
+    crdt::{Decomposable, Measurable},
     tracker::{DefaultTracker, NetworkEvent, Tracker},
 };
 
 use super::{BucketDispatcher, Protocol};
 
-pub struct Buckets {
-    dispatcher: BucketDispatcher<GSet<String>>,
-    local: GSet<String>,
-    remote: GSet<String>,
+pub struct Buckets<T> {
+    dispatcher: BucketDispatcher<T>,
+    local: T,
+    remote: T,
 }
 
-impl Buckets {
+impl<T> Buckets<T> {
     #[inline]
     #[must_use]
-    pub fn new(local: GSet<String>, remote: GSet<String>) -> Self {
+    pub fn new(local: T, remote: T, dispatcher: BucketDispatcher<T>) -> Self {
         Self {
-            dispatcher: BucketDispatcher::new(local.len()),
             local,
             remote,
-        }
-    }
-
-    #[inline]
-    #[must_use]
-    pub fn with_dispatcher(
-        local: GSet<String>,
-        remote: GSet<String>,
-        dispatcher: BucketDispatcher<GSet<String>>,
-    ) -> Self {
-        Self {
             dispatcher,
-            local,
-            remote,
         }
     }
 }
 
-impl Protocol for Buckets {
-    type Replica = GSet<String>;
+impl<T> Protocol for Buckets<T>
+where
+    T: Clone + Decomposable<Decomposition = T> + Default + Measurable,
+{
     type Tracker = DefaultTracker;
-
-    fn size_of(replica: &Self::Replica) -> usize {
-        replica.elements().iter().map(String::len).sum()
-    }
 
     fn sync(&mut self, tracker: &mut Self::Tracker) {
         assert!(
@@ -76,7 +60,7 @@ impl Protocol for Buckets {
             .zip(zip(local_hashes, remote_hashes))
             .filter_map(|((i, bucket), (local_bucket_hash, remote_bucket_hash))| {
                 (local_bucket_hash != remote_bucket_hash).then(|| {
-                    let mut state = GSet::new();
+                    let mut state = T::default();
                     state.join(bucket.into_values().collect());
 
                     (i, state)
@@ -88,7 +72,7 @@ impl Protocol for Buckets {
             tracker.download(),
             non_matching
                 .iter()
-                .map(|(i, r)| mem::size_of_val(i) + <Buckets as Protocol>::size_of(r))
+                .map(|(i, r)| mem::size_of_val(i) + <T as Measurable>::size_of(r))
                 .sum(),
         ));
 
@@ -100,7 +84,7 @@ impl Protocol for Buckets {
             .enumerate()
             .filter_map(|(i, bucket)| {
                 remote_buckets.contains_key(&i).then(|| {
-                    let mut state = GSet::new();
+                    let mut state = T::default();
                     state.join(bucket.into_values().collect());
 
                     (i, state)
@@ -118,10 +102,7 @@ impl Protocol for Buckets {
 
         tracker.register(NetworkEvent::local_to_remote(
             tracker.upload(),
-            remote_unknown
-                .iter()
-                .map(<Buckets as Protocol>::size_of)
-                .sum(),
+            remote_unknown.iter().map(<T as Measurable>::size_of).sum(),
         ));
 
         // 5. Join the appropriate join-decompositions to each replica.
@@ -129,12 +110,7 @@ impl Protocol for Buckets {
         self.remote.join(remote_unknown);
 
         // 6. Sanity check.
-        tracker.finish(
-            self.local
-                .elements()
-                .symmetric_difference(self.remote.elements())
-                .count(),
-        );
+        tracker.finish(<T as Measurable>::false_matches(&self.local, &self.remote));
     }
 }
 
@@ -143,12 +119,12 @@ mod tests {
     use std::mem;
 
     use super::*;
-    use crate::tracker::NetworkBandwitdth;
+    use crate::{crdt::GSet, tracker::NetworkBandwitdth};
 
     #[test]
     fn test_sync() {
         let local = {
-            let mut gset = GSet::<String>::new();
+            let mut gset = GSet::new();
             let items = "Stuck In A Moment You Can't Get Out Of"
                 .split_whitespace()
                 .collect::<Vec<_>>();
@@ -161,7 +137,7 @@ mod tests {
         };
 
         let remote = {
-            let mut gset = GSet::<String>::new();
+            let mut gset = GSet::new();
             let items = "I Still Haven't Found What I'm Looking For"
                 .split_whitespace()
                 .collect::<Vec<_>>();
@@ -174,7 +150,7 @@ mod tests {
         };
 
         let dispatcher = BucketDispatcher::new((1.25 * local.len() as f64) as usize);
-        let mut baseline = Buckets::with_dispatcher(local, remote, dispatcher);
+        let mut baseline = Buckets::new(local, remote, dispatcher);
 
         let (download, upload) = (NetworkBandwitdth::Kbps(0.5), NetworkBandwitdth::Kbps(0.5));
         let mut tracker = DefaultTracker::new(download, upload);

@@ -1,13 +1,13 @@
 use std::{
     collections::BTreeMap,
-    hash::{BuildHasher, Hash, RandomState},
+    hash::{BuildHasher, RandomState},
     marker::PhantomData,
     mem,
 };
 
 use crate::{
     bloom::BloomFilter,
-    crdt::{AWSet, Decomposable, GSet},
+    crdt::{Decomposable, Measurable},
     tracker::Tracker,
 };
 
@@ -17,10 +17,8 @@ pub mod bloombuckets;
 pub mod buckets;
 
 pub trait Protocol {
-    type Replica: Decomposable;
     type Tracker: Tracker;
 
-    fn size_of(replica: &Self::Replica) -> usize;
     fn sync(&mut self, tracker: &mut Self::Tracker);
 }
 
@@ -61,43 +59,19 @@ where
     }
 }
 
-impl<T> BucketDispatcher<GSet<T>>
+impl<T> BucketDispatcher<T>
 where
-    T: Clone + Eq + Hash,
+    T: Clone + Decomposable<Decomposition = T> + Measurable,
 {
-    fn dispatch(&self, replica: &GSet<T>) -> Vec<Bucket<GSet<T>>> {
+    fn dispatch(&self, replica: &T) -> Vec<Bucket<T>> {
         let mut buckets = vec![Bucket::new(); self.num_buckets];
 
         replica.split().into_iter().for_each(|delta| {
             let item = delta
-                .elements()
-                .iter()
-                .next()
-                .expect("a decomposition should have a single item");
-
-            let hash = self.hasher.hash_one(item);
-            let idx = usize::try_from(hash).unwrap() % buckets.len();
-
-            buckets[idx].insert(hash, delta);
-        });
-
-        buckets
-    }
-}
-
-impl<T> BucketDispatcher<AWSet<T>>
-where
-    T: Clone + Eq + Hash,
-{
-    fn dispatch(&self, replica: &AWSet<T>) -> Vec<Bucket<AWSet<T>>> {
-        let mut buckets = vec![Bucket::new(); self.num_buckets];
-
-        replica.split().into_iter().for_each(|delta| {
-            let item = delta
-                .elements()
+                .query()
                 .into_iter()
                 .next()
-                .expect("a decomposition should have a single item");
+                .expect("a decomposition should have a single element");
 
             let hash = self.hasher.hash_one(item);
             let idx = usize::try_from(hash).unwrap() % buckets.len();
@@ -111,7 +85,7 @@ where
 
 #[derive(Debug)]
 pub struct Bloomer<T> {
-    fpr: f64,
+    pub fpr: f64,
     _marker: PhantomData<T>,
 }
 
@@ -131,11 +105,6 @@ impl<T> Bloomer<T> {
     }
 
     #[inline]
-    pub const fn fpr(&self) -> f64 {
-        self.fpr
-    }
-
-    #[inline]
     pub fn size_of(filter: &BloomFilter<T>) -> usize {
         filter.bitslice().chunks(8).count()
             + mem::size_of::<RandomState>() * 2
@@ -143,71 +112,34 @@ impl<T> Bloomer<T> {
     }
 }
 
-impl<T> Bloomer<GSet<T>>
+impl<T> Bloomer<T>
 where
-    T: Hash,
+    T: Clone + Decomposable<Decomposition = T> + Measurable,
 {
-    fn filter_from(&self, decompositions: &[GSet<T>]) -> BloomFilter<T> {
+    fn filter_from(&self, decompositions: &[T]) -> BloomFilter<String> {
         let mut filter = BloomFilter::new(decompositions.len(), self.fpr);
 
         decompositions.iter().for_each(|delta| {
             let item = delta
-                .elements()
-                .iter()
-                .next()
-                .expect("a decomposition should have a single element");
-            filter.insert(item);
-        });
-
-        filter
-    }
-
-    fn partition(
-        &self,
-        filter: &BloomFilter<T>,
-        decompositions: Vec<GSet<T>>,
-    ) -> (Vec<GSet<T>>, Vec<GSet<T>>) {
-        decompositions.into_iter().partition(|delta| {
-            let item = delta
-                .elements()
-                .iter()
-                .next()
-                .expect("a decomposition should have a single item");
-            filter.contains(item)
-        })
-    }
-}
-
-impl<T> Bloomer<AWSet<T>>
-where
-    T: Clone + Eq + Hash,
-{
-    fn filter_from(&self, decompositions: &[AWSet<T>]) -> BloomFilter<T> {
-        let mut filter = BloomFilter::new(decompositions.len(), self.fpr);
-
-        decompositions.iter().for_each(|delta| {
-            let item = delta
-                .elements()
+                .query()
                 .into_iter()
                 .next()
                 .expect("a decomposition should have a single element");
+
             filter.insert(&item);
         });
 
         filter
     }
 
-    fn partition(
-        &self,
-        filter: &BloomFilter<T>,
-        decompositions: Vec<AWSet<T>>,
-    ) -> (Vec<AWSet<T>>, Vec<AWSet<T>>) {
+    fn partition(&self, filter: &BloomFilter<String>, decompositions: Vec<T>) -> (Vec<T>, Vec<T>) {
         decompositions.into_iter().partition(|delta| {
             let item = delta
-                .elements()
+                .query()
                 .into_iter()
                 .next()
                 .expect("a decomposition should have a single item");
+
             filter.contains(&item)
         })
     }

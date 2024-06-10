@@ -1,14 +1,16 @@
 #![allow(dead_code)]
 
 use std::{
-    any, mem,
     ops::Range,
     time::{Duration, Instant},
 };
 
 use crate::{
-    crdt::GSet,
-    sync::Protocol,
+    crdt::{GSet, Measurable},
+    sync::{
+        baseline::Baseline, bloombuckets::BloomBuckets, buckets::Buckets, Bloomer,
+        BucketDispatcher, Protocol,
+    },
     tracker::{DefaultTracker, NetworkBandwitdth, NetworkEvent, Tracker},
 };
 
@@ -16,9 +18,6 @@ use rand::{
     distributions::{Alphanumeric, DistString, Distribution, Uniform},
     rngs::StdRng,
     SeedableRng,
-};
-use sync::{
-    baseline::Baseline, bloombuckets::BloomBuckets, buckets::Buckets, Bloomer, BucketDispatcher,
 };
 
 mod bloom;
@@ -73,50 +72,21 @@ fn spawn_similar_gsets(
     // Ensure that each set has exactly the appropriate number of distinct items
     assert_eq!(cardinality, gsets.0.len());
     assert_eq!(cardinality, gsets.1.len());
-    assert_eq!(
-        gsets
-            .0
-            .elements()
-            .symmetric_difference(gsets.1.elements())
-            .count(),
-        2 * num_diff_items
-    );
+    assert_eq!(gsets.0.false_matches(&gsets.1), 2 * num_diff_items);
 
     gsets
 }
 
-fn spawn_distinct_gset(
-    cardinality: usize,
-    lengths: Range<usize>,
-    rng: &mut StdRng,
-) -> GSet<String> {
-    let mut replica = GSet::new();
-
-    Uniform::from(lengths)
-        .sample_iter(rng.clone())
-        .map(|len| Alphanumeric.sample_string(rng, len))
-        .take(cardinality)
-        .for_each(|item| {
-            replica.insert(item);
-        });
-
-    assert_eq!(cardinality, replica.len());
-    replica
-}
-
 #[derive(Debug)]
-struct ReplicaStatus {
-    size: usize,
-    bandwidth: NetworkBandwitdth,
-}
+struct ReplicaStatus(usize, NetworkBandwitdth);
 
 /// Runs the specified protocol and outputs the metrics obtained.
 fn run<P>(
     protocol: &mut P,
-    id: Option<&str>,
+    type_name: &str,
     similarity: f64,
-    local: &ReplicaStatus,
-    remote: &ReplicaStatus,
+    ReplicaStatus(size_of_remote, download): &ReplicaStatus,
+    ReplicaStatus(size_of_local, upload): &ReplicaStatus,
 ) where
     P: Protocol<Tracker = DefaultTracker>,
 {
@@ -125,16 +95,8 @@ fn run<P>(
         "similarity should be a ratio between 0.0 and 1.0"
     );
 
-    let (size_of_local, upload) = (local.size, local.bandwidth);
-    let (size_of_remote, download) = (remote.size, remote.bandwidth);
-
-    let mut tracker = DefaultTracker::new(download, upload);
+    let mut tracker = DefaultTracker::new(*download, *upload);
     protocol.sync(&mut tracker);
-
-    let type_name = {
-        let name = any::type_name_of_val(&protocol).split("::").last().unwrap();
-        id.map_or(name.to_string(), |i| format!("{name}<{i}>"))
-    };
 
     let diffs = tracker.diffs();
     if diffs > 0 {
@@ -158,42 +120,58 @@ fn exec_similar(replicas: &SimilarReplicas<GSet<String>>) {
     // Baseline
     replicas.iter().for_each(|(s, local, remote)| {
         let mut protocol = Baseline::new(local.0.clone(), remote.0.clone());
-        run(&mut protocol, None, *s, &local.1, &remote.1);
+        run(&mut protocol, "Baseline", *s, &local.1, &remote.1);
     });
 
     // Buckets<0.2>
     replicas.iter().for_each(|(s, local, remote)| {
         let dispatcher = BucketDispatcher::new((0.2 * local.0.len() as f64) as usize);
-        let mut protocol = Buckets::with_dispatcher(local.0.clone(), remote.0.clone(), dispatcher);
-        run(&mut protocol, Some("lf=0.2"), *s, &local.1, &remote.1);
+        let mut protocol = Buckets::new(local.0.clone(), remote.0.clone(), dispatcher);
+        run(&mut protocol, "Buckets [lf=0.2]", *s, &local.1, &remote.1);
     });
 
     // Buckets<1.0>
-    // NOTE: A Bucket with a `load_factor` of 1.0 is the default.
     replicas.iter().for_each(|(s, local, remote)| {
-        let mut protocol = Buckets::new(local.0.clone(), remote.0.clone());
-        run(&mut protocol, Some("lf=1.0"), *s, &local.1, &remote.1);
+        let dispatcher = BucketDispatcher::new(local.0.len());
+        let mut protocol = Buckets::new(local.0.clone(), remote.0.clone(), dispatcher);
+        run(&mut protocol, "Buckets [lf=1.0]", *s, &local.1, &remote.1);
     });
 
     // Buckets<5.0>
     replicas.iter().for_each(|(s, local, remote)| {
         let dispatcher = BucketDispatcher::new(5 * local.0.len());
-        let mut protocol = Buckets::with_dispatcher(local.0.clone(), remote.0.clone(), dispatcher);
-        run(&mut protocol, Some("lf=5.0"), *s, &local.1, &remote.1);
+        let mut protocol = Buckets::new(local.0.clone(), remote.0.clone(), dispatcher);
+        run(&mut protocol, "Buckets [lf=5.0]", *s, &local.1, &remote.1);
     });
 
     // BloomBuckets<1.0, 0.01>
-    // NOTE: A bucket with load_factor` of 1.0 and a false positive rate of 1% are the defaults.
     replicas.iter().for_each(|(s, local, remote)| {
-        let mut protocol = BloomBuckets::new(local.0.clone(), remote.0.clone());
-        run(&mut protocol, Some("fpr=1%"), *s, &local.1, &remote.1);
+        let bloomer = Bloomer::new(0.01);
+        let dispatcher = BucketDispatcher::new(local.0.len());
+        let mut protocol =
+            BloomBuckets::new(local.0.clone(), remote.0.clone(), bloomer, dispatcher);
+        run(
+            &mut protocol,
+            "BloomBuckets [fpr=1%,lf=1.0]",
+            *s,
+            &local.1,
+            &remote.1,
+        );
     });
 
     // BloomBuckets<1.0, 0.025>
     replicas.iter().for_each(|(s, local, remote)| {
         let bloomer = Bloomer::new(0.05);
-        let mut protocol = BloomBuckets::with_bloomer(local.0.clone(), remote.0.clone(), bloomer);
-        run(&mut protocol, Some("fpr=5%"), *s, &local.1, &remote.1);
+        let dispatcher = BucketDispatcher::new(local.0.len());
+        let mut protocol =
+            BloomBuckets::new(local.0.clone(), remote.0.clone(), bloomer, dispatcher);
+        run(
+            &mut protocol,
+            "BloomBuckets [fpr=5%,lf=1.0]",
+            *s,
+            &local.1,
+            &remote.1,
+        );
     });
 }
 
@@ -218,15 +196,9 @@ fn main() {
             let similarity = f64::from(s) / 100.0;
             let (local, remote) = spawn_similar_gsets(100_000, 50..80, similarity, &mut rng);
 
-            let local_status = ReplicaStatus {
-                size: local.elements().iter().map(String::len).sum(),
-                bandwidth: NetworkBandwitdth::Mbps(10.0),
-            };
-
-            let remote_status = ReplicaStatus {
-                size: remote.elements().iter().map(String::len).sum(),
-                bandwidth: NetworkBandwitdth::Mbps(10.0),
-            };
+            let local_status = ReplicaStatus(GSet::size_of(&local), NetworkBandwitdth::Mbps(10.0));
+            let remote_status =
+                ReplicaStatus(GSet::size_of(&remote), NetworkBandwitdth::Mbps(10.0));
 
             (similarity, (local, local_status), (remote, remote_status))
         })
@@ -240,8 +212,8 @@ fn main() {
     replicas
         .iter_mut()
         .for_each(|(_, (_, local_status), (_, remote_status))| {
-            local_status.bandwidth = NetworkBandwitdth::Mbps(1.0);
-            remote_status.bandwidth = NetworkBandwitdth::Mbps(10.0);
+            local_status.1 = NetworkBandwitdth::Mbps(1.0);
+            remote_status.1 = NetworkBandwitdth::Mbps(10.0);
         });
 
     println!();
@@ -251,8 +223,8 @@ fn main() {
     replicas
         .iter_mut()
         .for_each(|(_, (_, local_status), (_, remote_status))| {
-            local_status.bandwidth = NetworkBandwitdth::Mbps(10.0);
-            remote_status.bandwidth = NetworkBandwitdth::Mbps(1.0);
+            local_status.1 = NetworkBandwitdth::Mbps(10.0);
+            remote_status.1 = NetworkBandwitdth::Mbps(1.0);
         });
 
     println!();

@@ -1,58 +1,37 @@
 use std::{collections::HashMap, iter::zip, mem};
 
 use crate::{
-    crdt::{Decomposable, GSet},
+    crdt::{Decomposable, Measurable},
     tracker::{DefaultTracker, NetworkEvent, Tracker},
 };
 
 use super::{Bloomer, BucketDispatcher, Protocol};
 
-pub struct BloomBuckets {
-    bloomer: Bloomer<GSet<String>>,
-    dispatcher: BucketDispatcher<GSet<String>>,
-    local: GSet<String>,
-    remote: GSet<String>,
+pub struct BloomBuckets<T> {
+    bloomer: Bloomer<T>,
+    dispatcher: BucketDispatcher<T>,
+    local: T,
+    remote: T,
 }
 
-impl BloomBuckets {
+impl<T> BloomBuckets<T> {
     #[inline]
     #[must_use]
-    pub fn new(local: GSet<String>, remote: GSet<String>) -> Self {
-        let num_buckets = (1.01 * local.len() as f64) as usize;
-
-        Self {
-            bloomer: Bloomer::new(0.01),
-            dispatcher: BucketDispatcher::new(num_buckets),
-            local,
-            remote,
-        }
-    }
-
-    #[inline]
-    #[must_use]
-    pub fn with_bloomer(
-        local: GSet<String>,
-        remote: GSet<String>,
-        bloomer: Bloomer<GSet<String>>,
-    ) -> Self {
-        let num_buckets = (1.0 + bloomer.fpr() * local.len() as f64) as usize;
-
+    pub fn new(local: T, remote: T, bloomer: Bloomer<T>, dispatcher: BucketDispatcher<T>) -> Self {
         Self {
             bloomer,
-            dispatcher: BucketDispatcher::new(num_buckets),
+            dispatcher,
             local,
             remote,
         }
     }
 }
 
-impl Protocol for BloomBuckets {
-    type Replica = GSet<String>;
+impl<T> Protocol for BloomBuckets<T>
+where
+    T: Clone + Decomposable<Decomposition = T> + Default + Measurable,
+{
     type Tracker = DefaultTracker;
-
-    fn size_of(replica: &Self::Replica) -> usize {
-        replica.elements().iter().map(String::len).sum()
-    }
 
     fn sync(&mut self, tracker: &mut Self::Tracker) {
         assert!(
@@ -79,7 +58,7 @@ impl Protocol for BloomBuckets {
         //    For pipelining, the remaining decompositions and bucket's hashes are also sent.
         let remote_filter = self.bloomer.filter_from(&remote_common);
         let remote_buckets = {
-            let mut state = GSet::new();
+            let mut state = T::default();
             state.join(remote_common);
 
             self.dispatcher.dispatch(&state)
@@ -90,7 +69,7 @@ impl Protocol for BloomBuckets {
             tracker.download(),
             local_unknown
                 .iter()
-                .map(<BloomBuckets as Protocol>::size_of)
+                .map(<T as Measurable>::size_of)
                 .sum::<usize>()
                 + Bloomer::size_of(&remote_filter)
                 + mem::size_of_val(remote_hashes.as_slice()),
@@ -106,7 +85,7 @@ impl Protocol for BloomBuckets {
         // a bucket based on the modulo of its hash and send the hashes to the remote replica.
         // NOTE: This policy must be deterministic across both peers.
         let local_buckets = {
-            let mut state = GSet::new();
+            let mut state = T::default();
             state.join(local_common);
 
             self.dispatcher.dispatch(&state)
@@ -119,7 +98,7 @@ impl Protocol for BloomBuckets {
             .zip(zip(local_hashes, remote_hashes))
             .filter_map(|((i, bucket), (local_bucket_hash, remote_bucket_hash))| {
                 (local_bucket_hash != remote_bucket_hash).then(|| {
-                    let mut state = GSet::new();
+                    let mut state = T::default();
                     state.join(bucket.into_values().collect());
 
                     (i, state)
@@ -131,11 +110,11 @@ impl Protocol for BloomBuckets {
             tracker.upload(),
             remote_unknown
                 .iter()
-                .map(<BloomBuckets as Protocol>::size_of)
+                .map(<T as Measurable>::size_of)
                 .sum::<usize>()
                 + non_matching
                     .iter()
-                    .map(|(i, r)| mem::size_of_val(i) + <BloomBuckets as Protocol>::size_of(r))
+                    .map(|(i, r)| mem::size_of_val(i) + <T as Measurable>::size_of(r))
                     .sum::<usize>(),
         ));
 
@@ -145,7 +124,7 @@ impl Protocol for BloomBuckets {
             .enumerate()
             .filter_map(|(i, bucket)| {
                 local_buckets.contains_key(&i).then(|| {
-                    let mut state = GSet::new();
+                    let mut state = T::default();
                     state.join(bucket.into_values().collect());
 
                     (i, state)
@@ -171,7 +150,7 @@ impl Protocol for BloomBuckets {
             tracker.download(),
             local_false_positives
                 .iter()
-                .map(<BloomBuckets as Protocol>::size_of)
+                .map(<T as Measurable>::size_of)
                 .sum(),
         ));
 
@@ -183,24 +162,19 @@ impl Protocol for BloomBuckets {
         self.local.join(local_false_positives);
 
         // 6. Sanity Check.
-        tracker.finish(
-            self.local
-                .elements()
-                .symmetric_difference(self.remote.elements())
-                .count(),
-        );
+        tracker.finish(<T as Measurable>::false_matches(&self.local, &self.remote));
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tracker::NetworkBandwitdth;
+    use crate::{crdt::GSet, tracker::NetworkBandwitdth};
 
     #[test]
     fn test_sync() {
         let local = {
-            let mut gset = GSet::<String>::new();
+            let mut gset = GSet::new();
             let items = "a b c d e f g h i j k l"
                 .split_whitespace()
                 .collect::<Vec<_>>();
@@ -213,7 +187,7 @@ mod tests {
         };
 
         let remote = {
-            let mut gset = GSet::<String>::new();
+            let mut gset = GSet::new();
             let items = "m n o p q r s t u v w x y z"
                 .split_whitespace()
                 .collect::<Vec<_>>();
@@ -225,7 +199,10 @@ mod tests {
             gset
         };
 
-        let mut baseline = BloomBuckets::new(local, remote);
+        let bloomer = Bloomer::new(0.01);
+        let dispatcher = BucketDispatcher::new((1.01 * local.len() as f64) as usize);
+        let mut baseline = BloomBuckets::new(local, remote, bloomer, dispatcher);
+
         let (download, upload) = (NetworkBandwitdth::Kbps(0.5), NetworkBandwitdth::Kbps(0.5));
         let mut tracker = DefaultTracker::new(download, upload);
 

@@ -1,20 +1,20 @@
 use crate::{
-    crdt::{Decomposable, GSet},
+    crdt::{Decomposable, Measurable},
     tracker::{DefaultTracker, NetworkEvent, Tracker},
 };
 
 use super::{Bloomer, Protocol};
 
-pub struct Bloom {
-    bloomer: Bloomer<GSet<String>>,
-    local: GSet<String>,
-    remote: GSet<String>,
+pub struct Bloom<T> {
+    bloomer: Bloomer<T>,
+    local: T,
+    remote: T,
 }
 
-impl Bloom {
+impl<T> Bloom<T> {
     #[inline]
     #[must_use]
-    pub fn new(local: GSet<String>, remote: GSet<String>) -> Self {
+    pub fn new(local: T, remote: T) -> Self {
         Self {
             bloomer: Bloomer::new(0.01),
             local,
@@ -24,11 +24,7 @@ impl Bloom {
 
     #[inline]
     #[must_use]
-    pub fn with_bloomer(
-        local: GSet<String>,
-        remote: GSet<String>,
-        bloomer: Bloomer<GSet<String>>,
-    ) -> Self {
+    pub fn with_bloomer(local: T, remote: T, bloomer: Bloomer<T>) -> Self {
         Self {
             local,
             remote,
@@ -37,13 +33,11 @@ impl Bloom {
     }
 }
 
-impl Protocol for Bloom {
-    type Replica = GSet<String>;
+impl<T> Protocol for Bloom<T>
+where
+    T: Clone + Decomposable<Decomposition = T> + Measurable,
+{
     type Tracker = DefaultTracker;
-
-    fn size_of(replica: &Self::Replica) -> usize {
-        replica.elements().iter().map(String::len).sum()
-    }
 
     fn sync(&mut self, tracker: &mut Self::Tracker) {
         assert!(
@@ -73,7 +67,7 @@ impl Protocol for Bloom {
             Bloomer::size_of(&remote_filter)
                 + local_unknown
                     .iter()
-                    .map(<Bloom as Protocol>::size_of)
+                    .map(<T as Measurable>::size_of)
                     .sum::<usize>(),
         ));
 
@@ -83,10 +77,7 @@ impl Protocol for Bloom {
 
         tracker.register(NetworkEvent::local_to_remote(
             tracker.upload(),
-            remote_unknown
-                .iter()
-                .map(<Bloom as Protocol>::size_of)
-                .sum(),
+            remote_unknown.iter().map(<T as Measurable>::size_of).sum(),
         ));
 
         // 5. Join the incoming join-decompositions on both replicas.
@@ -95,11 +86,6 @@ impl Protocol for Bloom {
 
         // 6. Sanity check.
         // NOTE: This algorithm does not guarantee full sync.
-        tracker.finish(
-            self.local
-                .elements()
-                .symmetric_difference(self.remote.elements())
-                .count(),
-        );
+        tracker.finish(<T as Measurable>::false_matches(&self.local, &self.remote));
     }
 }

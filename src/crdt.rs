@@ -2,7 +2,6 @@ use std::{
     cmp::max,
     collections::{HashMap, HashSet},
     hash::Hash,
-    mem,
 };
 
 pub trait Decomposable {
@@ -14,7 +13,10 @@ pub trait Decomposable {
 }
 
 pub trait Measurable {
-    fn size_of(&self) -> usize;
+    // FIXME: Query should be part of its own trait.
+    fn query(&self) -> HashSet<String>;
+    fn size_of(replica: &Self) -> usize;
+    fn false_matches(&self, other: &Self) -> usize;
 }
 
 #[derive(Clone, Debug, Default)]
@@ -24,8 +26,11 @@ pub struct GSet<T> {
 
 impl<T> GSet<T> {
     #[inline]
-    pub fn elements(&self) -> &HashSet<T> {
-        &self.base
+    #[must_use]
+    pub fn new() -> Self {
+        Self {
+            base: HashSet::new(),
+        }
     }
 
     #[inline]
@@ -41,19 +46,21 @@ impl<T> GSet<T> {
 
 impl<T> GSet<T>
 where
-    T: Clone + Eq + Hash,
+    T: Eq + Hash,
 {
-    #[inline]
-    #[must_use]
-    pub fn new() -> Self {
-        Self {
-            base: HashSet::new(),
-        }
-    }
-
     #[inline]
     pub fn contains(&self, value: &T) -> bool {
         self.base.contains(value)
+    }
+}
+
+impl<T> GSet<T>
+where
+    T: Clone + Eq + Hash,
+{
+    #[inline]
+    pub fn elements(&self) -> HashSet<T> {
+        self.base.clone()
     }
 
     pub fn insert(&mut self, value: T) -> Self {
@@ -71,7 +78,7 @@ where
 
 impl<T> Decomposable for GSet<T>
 where
-    T: Eq + Hash + Clone,
+    T: Clone + Eq + Hash,
 {
     type Decomposition = GSet<T>;
 
@@ -99,8 +106,16 @@ where
 }
 
 impl Measurable for GSet<String> {
-    fn size_of(&self) -> usize {
-        self.base.iter().map(String::len).sum()
+    fn query(&self) -> HashSet<String> {
+        self.elements()
+    }
+
+    fn size_of(replica: &Self) -> usize {
+        replica.base.iter().map(String::len).sum()
+    }
+
+    fn false_matches(&self, other: &Self) -> usize {
+        self.base.symmetric_difference(&other.base).count()
     }
 }
 
@@ -137,6 +152,9 @@ mod gset {
         assert_eq!(joinable.len(), splittable.len());
         assert!(joinable.contains(&1));
         assert!(joinable.contains(&2));
+
+        joinable.insert(3);
+        assert_eq!(joinable.elements(), HashSet::from_iter(1..=3));
     }
 
     #[test]
@@ -177,6 +195,14 @@ pub struct GCounter<I> {
 
 impl<I> GCounter<I> {
     #[inline]
+    #[must_use]
+    pub fn new() -> Self {
+        Self {
+            base: HashMap::new(),
+        }
+    }
+
+    #[inline]
     pub fn count(&self) -> i64 {
         self.base.values().sum()
     }
@@ -186,14 +212,6 @@ impl<I> GCounter<I>
 where
     I: Clone + Eq + Hash,
 {
-    #[inline]
-    #[must_use]
-    pub fn new() -> Self {
-        Self {
-            base: HashMap::new(),
-        }
-    }
-
     pub fn increment(&mut self, id: &I) -> Self {
         let increments = self
             .base
@@ -309,15 +327,14 @@ pub struct AWSet<T> {
     removed: HashSet<u64>,
 }
 
-impl<T> AWSet<T>
-where
-    T: Eq + Hash,
-{
+impl<T> AWSet<T> {
     #[inline]
-    pub fn contains(&self, value: &T) -> bool {
-        self.inserted
-            .iter()
-            .any(|(id, v)| value == v && !self.removed.contains(id))
+    #[must_use]
+    pub fn new() -> Self {
+        Self {
+            inserted: HashMap::new(),
+            removed: HashSet::new(),
+        }
     }
 
     #[inline]
@@ -336,17 +353,20 @@ where
 
 impl<T> AWSet<T>
 where
-    T: Clone + Eq + Hash,
+    T: Eq + Hash,
 {
     #[inline]
-    #[must_use]
-    pub fn new() -> Self {
-        Self {
-            inserted: HashMap::new(),
-            removed: HashSet::new(),
-        }
+    pub fn contains(&self, value: &T) -> bool {
+        self.inserted
+            .iter()
+            .any(|(id, v)| value == v && !self.removed.contains(id))
     }
+}
 
+impl<T> AWSet<T>
+where
+    T: Clone + Eq + Hash,
+{
     #[inline]
     pub fn elements(&self) -> HashSet<T> {
         self.inserted
@@ -431,10 +451,32 @@ where
 }
 
 impl Measurable for AWSet<String> {
-    fn size_of(&self) -> usize {
-        self.inserted.len() * mem::size_of::<u64>()
-            + self.removed.len() * mem::size_of::<u64>()
-            + self.inserted.values().map(String::len).sum::<usize>()
+    fn query(&self) -> HashSet<String> {
+        self.elements()
+    }
+
+    fn size_of(replica: &Self) -> usize {
+        replica
+            .inserted
+            .iter()
+            .filter_map(|(id, v)| (!replica.removed.contains(id)).then_some(v))
+            .map(String::len)
+            .sum()
+    }
+
+    fn false_matches(&self, other: &Self) -> usize {
+        self.inserted
+            .iter()
+            .filter_map(|(id, v)| (!self.removed.contains(id)).then_some(v))
+            .filter(|v| !other.contains(v))
+            .chain(
+                other
+                    .inserted
+                    .iter()
+                    .filter_map(|(id, v)| (!other.removed.contains(id)).then_some(v))
+                    .filter(|v| !self.contains(v)),
+            )
+            .count()
     }
 }
 
@@ -480,6 +522,7 @@ mod awset {
         awset.insert(2);
         awset.insert(4);
         assert_eq!(awset.len(), 4);
+        assert_eq!(awset.elements(), HashSet::from_iter(1..=4));
     }
 
     #[test]

@@ -1,30 +1,31 @@
 use crate::{
-    crdt::{Decomposable, GSet},
+    crdt::{Decomposable, Measurable},
     tracker::{DefaultTracker, NetworkEvent, Tracker},
 };
 
 use super::Protocol;
 
-pub struct Baseline {
-    local: GSet<String>,
-    remote: GSet<String>,
+pub struct Baseline<T> {
+    local: T,
+    remote: T,
 }
 
-impl Baseline {
+impl<T> Baseline<T>
+where
+    T: Decomposable + Measurable,
+{
     #[inline]
     #[must_use]
-    pub fn new(local: GSet<String>, remote: GSet<String>) -> Self {
+    pub fn new(local: T, remote: T) -> Self {
         Self { local, remote }
     }
 }
 
-impl Protocol for Baseline {
-    type Replica = GSet<String>;
+impl<T> Protocol for Baseline<T>
+where
+    T: Clone + Decomposable<Decomposition = T> + Measurable,
+{
     type Tracker = DefaultTracker;
-
-    fn size_of(replica: &Self::Replica) -> usize {
-        replica.elements().iter().map(String::len).sum()
-    }
 
     fn sync(&mut self, tracker: &mut Self::Tracker) {
         assert!(
@@ -37,7 +38,7 @@ impl Protocol for Baseline {
 
         tracker.register(NetworkEvent::local_to_remote(
             tracker.upload(),
-            <Baseline as Protocol>::size_of(&local_state),
+            <T as Measurable>::size_of(&local_state),
         ));
 
         // 2. Compute the optimal delta based on the remote replica state.
@@ -46,7 +47,7 @@ impl Protocol for Baseline {
 
         tracker.register(NetworkEvent::remote_to_local(
             tracker.download(),
-            <Baseline as Protocol>::size_of(&local_unseen),
+            <T as Measurable>::size_of(&local_unseen),
         ));
 
         // 3. Join the decompositions that are unknown to the remote replica.
@@ -54,19 +55,14 @@ impl Protocol for Baseline {
         self.local.join(vec![local_unseen]);
 
         // 4. Sanity check.
-        tracker.finish(
-            self.local
-                .elements()
-                .symmetric_difference(self.remote.elements())
-                .count(),
-        );
+        tracker.finish(<T as Measurable>::false_matches(&self.local, &self.remote));
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tracker::NetworkBandwitdth;
+    use crate::{crdt::GSet, tracker::NetworkBandwitdth};
 
     #[test]
     fn test_sync() {
