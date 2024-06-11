@@ -4,10 +4,6 @@ pub trait Tracker {
     type Event;
 
     fn is_ready(&self) -> bool;
-
-    fn upload(&self) -> Bandwidth;
-    fn download(&self) -> Bandwidth;
-
     fn register(&mut self, event: Self::Event);
     fn events(&self) -> &Vec<Self::Event>;
     fn finish(&mut self, diffs: usize);
@@ -126,19 +122,23 @@ impl DefaultTracker {
     }
 }
 
+impl DefaultTracker {
+    #[inline]
+    pub const fn download(&self) -> Bandwidth {
+        self.download
+    }
+
+    #[inline]
+    pub const fn upload(&self) -> Bandwidth {
+        self.upload
+    }
+}
+
 impl Tracker for DefaultTracker {
     type Event = DefaultEvent;
 
     fn is_ready(&self) -> bool {
         self.events.is_empty() && self.diffs.is_none()
-    }
-
-    fn download(&self) -> Bandwidth {
-        self.download
-    }
-
-    fn upload(&self) -> Bandwidth {
-        self.upload
     }
 
     fn register(&mut self, event: Self::Event) {
