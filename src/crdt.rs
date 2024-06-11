@@ -40,7 +40,7 @@ impl<'a, T> Iterator for Elements<'a, T> {
         }
 
         self.idx += 1;
-        Some(&self.elems[self.idx])
+        Some(self.elems[self.idx])
     }
 }
 
@@ -146,7 +146,7 @@ where
             "a join-decomposition should have a single item"
         );
 
-        self.base.iter().cloned().next().unwrap()
+        self.base.iter().next().cloned().unwrap()
     }
 }
 
