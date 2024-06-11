@@ -40,7 +40,7 @@ impl<'a, T> Iterator for Elements<'a, T> {
         }
 
         self.idx += 1;
-        Some(self.elems[self.idx])
+        Some(self.elems[self.idx - 1])
     }
 }
 
