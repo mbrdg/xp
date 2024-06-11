@@ -1,8 +1,9 @@
 use std::{
-    cmp::max,
     collections::{HashMap, HashSet},
     hash::Hash,
 };
+
+use rand::Rng;
 
 pub trait Decomposable {
     type Decomposition;
@@ -243,6 +244,17 @@ impl<T> AWSet<T> {
             .filter(|id| !self.removed.contains(id))
             .count()
     }
+
+    fn uid(&self) -> u64 {
+        let mut rng = rand::thread_rng();
+        let mut id = rng.gen();
+
+        while self.inserted.contains_key(&id) {
+            id = rng.gen();
+        }
+
+        id
+    }
 }
 
 impl<T> AWSet<T>
@@ -285,7 +297,7 @@ where
     T: Clone + Eq + Hash,
 {
     pub fn insert(&mut self, value: T) -> Self {
-        let id = max(self.inserted.keys().max(), self.removed.iter().max()).unwrap_or(&0) + 1;
+        let id = self.uid();
         self.inserted.insert(id, value.clone());
 
         Self {
