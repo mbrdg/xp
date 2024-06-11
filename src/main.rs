@@ -1,178 +1,231 @@
 #![allow(dead_code)]
 
-use std::{
-    ops::Range,
-    time::{Duration, Instant},
-};
+use std::{time::Instant, usize};
 
 use crate::{
-    crdt::{GSet, Measurable},
-    sync::{
-        baseline::Baseline, bloombuckets::BloomBuckets, buckets::Buckets, Bloomer,
-        BucketDispatcher, Protocol,
-    },
-    tracker::{DefaultTracker, NetworkBandwitdth, NetworkEvent, Tracker},
+    crdt::{AWSet, GSet, Measurable},
+    sync::{baseline::Baseline, Protocol},
+    tracker::{Bandwidth, DefaultTracker, Tracker},
 };
 
+use crdt::{Decomposable, Extractable};
 use rand::{
     distributions::{Alphanumeric, DistString, Distribution, Uniform},
     rngs::StdRng,
+    seq::IteratorRandom,
     SeedableRng,
 };
+use sync::{bloombuckets::BloomBuckets, buckets::Buckets};
 
 mod bloom;
 mod crdt;
 mod sync;
 mod tracker;
 
-fn spawn_similar_gsets(
-    cardinality: usize,
-    lengths: Range<usize>,
-    similarity: f64,
-    rng: &mut StdRng,
-) -> (GSet<String>, GSet<String>) {
+fn gsets_with(len: usize, similar: f64, rng: &mut StdRng) -> (GSet<String>, GSet<String>) {
     assert!(
-        (0.0..=1.0).contains(&similarity),
-        "similarity should be a ratio between 0.0 and 1.0"
+        (0.0..=1.0).contains(&similar),
+        "similarity ratio should be in (0.0..=1.0)"
     );
 
-    let num_similar_items = (cardinality as f64 * similarity) as usize;
-    let num_diff_items = cardinality - num_similar_items;
+    let sims = (len as f64 * similar) as usize;
+    let diffs = len - sims;
 
-    let mut gsets = (GSet::new(), GSet::new());
+    let mut local = GSet::new();
+    let mut remote = GSet::new();
 
-    // Generate common items for both gsets
-    Uniform::from(lengths.clone())
+    Uniform::from(50..=80)
         .sample_iter(rng.clone())
         .map(|len| Alphanumeric.sample_string(rng, len))
-        .take(num_similar_items)
+        .take(sims)
         .for_each(|item| {
-            gsets.0.insert(item.clone());
-            gsets.1.insert(item);
+            local.insert(item.clone());
+            remote.insert(item);
         });
 
-    // Generate diff items for the first gset
-    Uniform::from(lengths.clone())
+    Uniform::from(50..=80)
         .sample_iter(rng.clone())
         .map(|len| Alphanumeric.sample_string(rng, len))
-        .take(num_diff_items)
+        .take(diffs)
         .for_each(|item| {
-            gsets.0.insert(item);
+            local.insert(item);
         });
 
-    // Generate diff items for the second gset
-    Uniform::from(lengths)
+    Uniform::from(50..=80)
         .sample_iter(rng.clone())
         .map(|len| Alphanumeric.sample_string(rng, len))
-        .take(num_diff_items)
+        .take(diffs)
         .for_each(|item| {
-            gsets.1.insert(item);
+            remote.insert(item);
         });
 
-    // Ensure that each set has exactly the appropriate number of distinct items
-    assert_eq!(cardinality, gsets.0.len());
-    assert_eq!(cardinality, gsets.1.len());
-    assert_eq!(gsets.0.false_matches(&gsets.1), 2 * num_diff_items);
-
-    gsets
+    assert_eq!(local.len(), len);
+    assert_eq!(remote.len(), len);
+    assert_eq!(local.false_matches(&remote), 2 * diffs);
+    (local, remote)
 }
 
-#[derive(Debug)]
-struct ReplicaStatus(usize, NetworkBandwitdth);
+fn awsets_with(
+    len: usize,
+    similar: f64,
+    del: f64,
+    rng: &mut StdRng,
+) -> (AWSet<String>, AWSet<String>) {
+    assert!(
+        (0.0..=1.0).contains(&similar),
+        "similarity ratio should be in (0.0..=1.0)"
+    );
+    assert!(
+        (0.0..0.95).contains(&del),
+        "deletion ratio should be in the in (0.0..0.95)"
+    );
+
+    let sims = (len as f64 * similar) as usize;
+    let diffs = len - sims;
+
+    let mut common = AWSet::new();
+    Uniform::from(50..=80)
+        .sample_iter(rng.clone())
+        .map(|len| Alphanumeric.sample_string(rng, len))
+        .take(sims)
+        .for_each(|item| {
+            common.insert(item);
+        });
+
+    let sims_dels = (sims as f64 * del) as usize;
+    let diff_dels = (diffs as f64 * del) as usize;
+
+    common
+        .elements()
+        .cloned()
+        .choose_multiple(rng, sims_dels)
+        .into_iter()
+        .for_each(|item| {
+            common.remove(&item);
+        });
+
+    let mut local_only = AWSet::new();
+    Uniform::from(50..=80)
+        .sample_iter(rng.clone())
+        .map(|len| Alphanumeric.sample_string(rng, len))
+        .take(diffs)
+        .for_each(|item| {
+            local_only.insert(item);
+        });
+
+    local_only
+        .elements()
+        .cloned()
+        .choose_multiple(rng, diff_dels)
+        .into_iter()
+        .for_each(|item| {
+            local_only.remove(&item);
+        });
+
+    let mut remote_only = AWSet::new();
+    Uniform::from(50..=80)
+        .sample_iter(rng.clone())
+        .map(|len| Alphanumeric.sample_string(rng, len))
+        .take(diffs)
+        .for_each(|item| {
+            remote_only.insert(item);
+        });
+
+    remote_only
+        .elements()
+        .cloned()
+        .choose_multiple(rng, diff_dels)
+        .into_iter()
+        .for_each(|item| {
+            remote_only.remove(&item);
+        });
+
+    let mut local = common.clone();
+    local.join(vec![local_only]);
+
+    let mut remote = common.clone();
+    remote.join(vec![remote_only]);
+
+    assert_eq!(local.len(), remote.len());
+    (local, remote)
+}
+
+#[derive(Clone, Debug)]
+struct Status(usize, Bandwidth);
 
 /// Runs the specified protocol and outputs the metrics obtained.
-fn run<P>(
-    protocol: &mut P,
-    type_name: &str,
-    similarity: f64,
-    ReplicaStatus(size_of_remote, download): &ReplicaStatus,
-    ReplicaStatus(size_of_local, upload): &ReplicaStatus,
-) where
+fn run<P>(proto: &mut P, id: &str, similar: f64, local_status: &Status, remote_status: &Status)
+where
     P: Protocol<Tracker = DefaultTracker>,
 {
     assert!(
-        (0.0..=1.0).contains(&similarity),
+        (0.0..=1.0).contains(&similar),
         "similarity should be a ratio between 0.0 and 1.0"
     );
 
+    let Status(size_of_local, upload) = local_status;
+    let Status(size_of_remote, download) = remote_status;
+
     let mut tracker = DefaultTracker::new(*download, *upload);
-    protocol.sync(&mut tracker);
+    proto.sync(&mut tracker);
 
     let diffs = tracker.diffs();
     if diffs > 0 {
-        eprintln!("{type_name} not totally synced with {diffs} diffs");
+        eprintln!("{id} not totally synced with {diffs} diffs");
     }
 
     let events = tracker.events();
-    let duration = events.iter().map(NetworkEvent::duration).sum::<Duration>();
-    let transferred = events.iter().map(NetworkEvent::bytes).sum::<usize>();
-
     println!(
-        "{type_name} {size_of_local} {size_of_remote} {} {} {transferred} {:.3}",
-        download.as_bytes_per_sec(),
+        "{id} {} {size_of_local} {size_of_remote} {} {}",
+        events.len(),
         upload.as_bytes_per_sec(),
-        duration.as_secs_f64()
+        download.as_bytes_per_sec(),
     );
+    events.iter().enumerate().for_each(|(i, e)| {
+        println!(
+            "{i} {} {} {:.3}",
+            e.state(),
+            e.metadata(),
+            e.duration().unwrap().as_secs_f64()
+        );
+    });
 }
 
-type SimilarReplicas<T> = Vec<(f64, (T, ReplicaStatus), (T, ReplicaStatus))>;
-fn exec_similar(replicas: &SimilarReplicas<GSet<String>>) {
-    // Baseline
-    replicas.iter().for_each(|(s, local, remote)| {
-        let mut protocol = Baseline::new(local.0.clone(), remote.0.clone());
-        run(&mut protocol, "Baseline", *s, &local.1, &remote.1);
-    });
+fn run_with<T>(similar: f64, local: T, remote: T)
+where
+    T: Clone + Decomposable<Decomposition = T> + Default + Extractable + Measurable,
+{
+    let links = [
+        (Bandwidth::Mbps(10.0), Bandwidth::Mbps(1.0)),
+        (Bandwidth::Mbps(10.0), Bandwidth::Mbps(10.0)),
+        (Bandwidth::Mbps(1.0), Bandwidth::Mbps(10.0)),
+    ];
 
-    // Buckets<0.2>
-    replicas.iter().for_each(|(s, local, remote)| {
-        let dispatcher = BucketDispatcher::new((0.2 * local.0.len() as f64) as usize);
-        let mut protocol = Buckets::new(local.0.clone(), remote.0.clone(), dispatcher);
-        run(&mut protocol, "Buckets [lf=0.2]", *s, &local.1, &remote.1);
-    });
-
-    // Buckets<1.0>
-    replicas.iter().for_each(|(s, local, remote)| {
-        let dispatcher = BucketDispatcher::new(local.0.len());
-        let mut protocol = Buckets::new(local.0.clone(), remote.0.clone(), dispatcher);
-        run(&mut protocol, "Buckets [lf=1.0]", *s, &local.1, &remote.1);
-    });
-
-    // Buckets<5.0>
-    replicas.iter().for_each(|(s, local, remote)| {
-        let dispatcher = BucketDispatcher::new(5 * local.0.len());
-        let mut protocol = Buckets::new(local.0.clone(), remote.0.clone(), dispatcher);
-        run(&mut protocol, "Buckets [lf=5.0]", *s, &local.1, &remote.1);
-    });
-
-    // BloomBuckets<1.0, 0.01>
-    replicas.iter().for_each(|(s, local, remote)| {
-        let bloomer = Bloomer::new(0.01);
-        let dispatcher = BucketDispatcher::new(local.0.len());
-        let mut protocol =
-            BloomBuckets::new(local.0.clone(), remote.0.clone(), bloomer, dispatcher);
-        run(
-            &mut protocol,
-            "BloomBuckets [fpr=1%,lf=1.0]",
-            *s,
-            &local.1,
-            &remote.1,
+    for (upload, download) in links {
+        let status = (
+            Status(<T as Measurable>::size_of(&local), upload),
+            Status(<T as Measurable>::size_of(&remote), download),
         );
-    });
+        let mut proto = Baseline::new(local.clone(), remote.clone());
+        run(&mut proto, "Baseline", similar, &status.0, &status.1);
 
-    // BloomBuckets<1.0, 0.025>
-    replicas.iter().for_each(|(s, local, remote)| {
-        let bloomer = Bloomer::new(0.05);
-        let dispatcher = BucketDispatcher::new(local.0.len());
-        let mut protocol =
-            BloomBuckets::new(local.0.clone(), remote.0.clone(), bloomer, dispatcher);
-        run(
-            &mut protocol,
-            "BloomBuckets [fpr=5%,lf=1.0]",
-            *s,
-            &local.1,
-            &remote.1,
-        );
-    });
+        for load in [0.2, 1.0, 5.0] {
+            let id = format!("Buckets[lf={load}]");
+            let num_buckets = (load * <T as Measurable>::len(&local) as f64) as usize;
+            let mut proto = Buckets::new(local.clone(), remote.clone(), num_buckets);
+
+            run(&mut proto, &id, similar, &status.0, &status.1);
+        }
+
+        for fpr in [0.2, 1.0, 5.0] {
+            let id = format!("BloomBuckets[lf=1.0,fpr={fpr:.1}%]");
+            let num_buckets = <T as Measurable>::len(&local);
+            let mut proto =
+                BloomBuckets::new(local.clone(), remote.clone(), fpr / 100.0, num_buckets);
+
+            run(&mut proto, &id, similar, &status.0, &status.1);
+        }
+    }
 }
 
 /// Entry point for the execution of the experiments.
@@ -184,51 +237,27 @@ fn exec_similar(replicas: &SimilarReplicas<GSet<String>>) {
 /// The second experiment is on replicas of distinct cardinalities, also with different link
 /// configurations, again, with both symmetric and asymmetric channels.
 fn main() {
-    let execution_time = Instant::now();
-
+    let exec_time = Instant::now();
     let seed = rand::random();
     let mut rng = StdRng::seed_from_u64(seed);
-    println!("seed={seed}");
+    eprintln!("[{:?}] got seed with value of {seed}", exec_time.elapsed());
 
-    let mut replicas = (0..=100)
-        .step_by(10)
-        .map(|s| {
-            let similarity = f64::from(s) / 100.0;
-            let (local, remote) = spawn_similar_gsets(100_000, 50..80, similarity, &mut rng);
+    (0..=100).step_by(10).for_each(|similar| {
+        let s = f64::from(similar) / 100.0;
+        let (local, remote) = gsets_with(100_000, s, &mut rng);
+        run_with(s, local, remote)
+    });
+    eprintln!("[{:?}] gsets done, going for awsets", exec_time.elapsed());
 
-            let local_status = ReplicaStatus(GSet::size_of(&local), NetworkBandwitdth::Mbps(10.0));
-            let remote_status =
-                ReplicaStatus(GSet::size_of(&remote), NetworkBandwitdth::Mbps(10.0));
-
-            (similarity, (local, local_status), (remote, remote_status))
-        })
-        .collect::<Vec<_>>();
-
-    // Upload == Download
-    println!();
-    exec_similar(&replicas);
-
-    // Upload << Download
-    replicas
-        .iter_mut()
-        .for_each(|(_, (_, local_status), (_, remote_status))| {
-            local_status.1 = NetworkBandwitdth::Mbps(1.0);
-            remote_status.1 = NetworkBandwitdth::Mbps(10.0);
-        });
-
-    println!();
-    exec_similar(&replicas);
-
-    // Upload >> Download
-    replicas
-        .iter_mut()
-        .for_each(|(_, (_, local_status), (_, remote_status))| {
-            local_status.1 = NetworkBandwitdth::Mbps(10.0);
-            remote_status.1 = NetworkBandwitdth::Mbps(1.0);
-        });
-
-    println!();
-    exec_similar(&replicas);
-
-    eprintln!("time elapsed: {:.3?}", execution_time.elapsed());
+    // NOTE: AWSets generated with 20% of elements removed. This value is pretty conservative for
+    // the particular study scenario of 15% of deleted or removed posts as in mainstream social
+    // media [1].
+    //
+    // [1]: https://www.researchgate.net/publication/367503309_Engagement_with_fact-checked_posts_on_Reddit
+    (0..=100).step_by(10).for_each(|similar| {
+        let s = f64::from(similar) / 100.0;
+        let (local, remote) = awsets_with(25_000, s, 0.2, &mut rng);
+        run_with(s, local, remote)
+    });
+    eprintln!("[{:.?}] awsets done, exiting...", exec_time.elapsed());
 }
