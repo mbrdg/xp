@@ -2,7 +2,7 @@ use std::{collections::HashMap, hash::RandomState, iter::zip, mem};
 
 use crate::{
     crdt::{Decomposable, Extractable, Measurable},
-    tracker::{DefaultTracker, NetworkEvent, Tracker},
+    tracker::{DefaultEvent, DefaultTracker, Tracker},
 };
 
 use super::{BloomBased, Dispatcher, Protocol};
@@ -51,10 +51,11 @@ where
         let local_decompositions = self.local.split();
         let local_filter = self.filter_from(&local_decompositions, self.fpr);
 
-        tracker.register(NetworkEvent::local_to_remote(
-            tracker.upload(),
-            <Self as BloomBased<T>>::size_of(&local_filter),
-        ));
+        tracker.register(DefaultEvent::LocalToRemote {
+            state: 0,
+            metadata: <Self as BloomBased<T>>::size_of(&local_filter),
+            upload: tracker.upload(),
+        });
 
         // 2. Partion the remote join-decompositions into *probably* present in both replicas or
         //    *definitely not* present in the local replica.
@@ -72,15 +73,12 @@ where
         };
         let remote_hashes = BloomBuckets::<T>::hashes(&remote_buckets, &hasher);
 
-        tracker.register(NetworkEvent::remote_to_local(
-            tracker.download(),
-            local_unknown
-                .iter()
-                .map(<T as Measurable>::size_of)
-                .sum::<usize>()
-                + <Self as BloomBased<T>>::size_of(&remote_filter)
+        tracker.register(DefaultEvent::RemoteToLocal {
+            state: local_unknown.iter().map(<T as Measurable>::size_of).sum(),
+            metadata: <Self as BloomBased<T>>::size_of(&remote_filter)
                 + mem::size_of_val(remote_hashes.as_slice()),
-        ));
+            download: tracker.download(),
+        });
 
         // 3. Compute the buckets whose hash does not match on the local replica and send those
         //    buckets back to the remote replica together with all the decompositions that are
@@ -112,17 +110,15 @@ where
             })
             .collect::<HashMap<_, _>>();
 
-        tracker.register(NetworkEvent::local_to_remote(
-            tracker.upload(),
-            remote_unknown
+        tracker.register(DefaultEvent::LocalToRemote {
+            state: remote_unknown
                 .iter()
+                .chain(non_matching.values())
                 .map(<T as Measurable>::size_of)
-                .sum::<usize>()
-                + non_matching
-                    .iter()
-                    .map(|(i, r)| mem::size_of_val(i) + <T as Measurable>::size_of(r))
-                    .sum::<usize>(),
-        ));
+                .sum(),
+            metadata: non_matching.keys().count() * mem::size_of::<usize>(),
+            upload: tracker.upload(),
+        });
 
         let local_buckets = non_matching;
         let remote_buckets = remote_buckets
@@ -152,13 +148,14 @@ where
             .map(|(i, local)| remote_buckets.get(i).unwrap().difference(local))
             .collect::<Vec<_>>();
 
-        tracker.register(NetworkEvent::remote_to_local(
-            tracker.download(),
-            local_false_positives
+        tracker.register(DefaultEvent::RemoteToLocal {
+            state: local_false_positives
                 .iter()
                 .map(<T as Measurable>::size_of)
                 .sum(),
-        ));
+            metadata: 0,
+            download: tracker.download(),
+        });
 
         // 5. Join the appropriate join-decompositions to each replica.
         self.remote.join(remote_unknown);
@@ -175,7 +172,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{crdt::GSet, tracker::NetworkBandwitdth};
+    use crate::{crdt::GSet, tracker::Bandwidth};
 
     #[test]
     fn test_sync() {
@@ -208,7 +205,7 @@ mod tests {
         let buckets = local.len();
         let mut baseline = BloomBuckets::new(local, remote, 0.01, buckets);
 
-        let (download, upload) = (NetworkBandwitdth::Kbps(0.5), NetworkBandwitdth::Kbps(0.5));
+        let (download, upload) = (Bandwidth::Kbps(0.5), Bandwidth::Kbps(0.5));
         let mut tracker = DefaultTracker::new(download, upload);
 
         baseline.sync(&mut tracker);

@@ -1,6 +1,6 @@
 use crate::{
     crdt::{Decomposable, Measurable},
-    tracker::{DefaultTracker, NetworkEvent, Tracker},
+    tracker::{DefaultEvent, DefaultTracker, Tracker},
 };
 
 use super::Protocol;
@@ -33,19 +33,21 @@ where
         // 1. Send the entire state from the local to the remote replica.
         let local_state = self.local.clone();
 
-        tracker.register(NetworkEvent::local_to_remote(
-            tracker.upload(),
-            <T as Measurable>::size_of(&local_state),
-        ));
+        tracker.register(DefaultEvent::LocalToRemote {
+            state: <T as Measurable>::size_of(&local_state),
+            metadata: 0,
+            upload: tracker.upload(),
+        });
 
         // 2. Compute the optimal delta based on the remote replica state.
         let remote_unseen = local_state.difference(&self.remote);
         let local_unseen = self.remote.difference(&local_state);
 
-        tracker.register(NetworkEvent::remote_to_local(
-            tracker.download(),
-            <T as Measurable>::size_of(&local_unseen),
-        ));
+        tracker.register(DefaultEvent::RemoteToLocal {
+            state: <T as Measurable>::size_of(&local_unseen),
+            metadata: 0,
+            download: tracker.download(),
+        });
 
         // 3. Join the decompositions that are unknown to the remote replica.
         self.remote.join(vec![remote_unseen]);
@@ -59,7 +61,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{crdt::GSet, tracker::NetworkBandwitdth};
+    use crate::{crdt::GSet, tracker::Bandwidth};
 
     #[test]
     fn test_sync() {
@@ -90,12 +92,12 @@ mod tests {
         };
 
         let mut baseline = Baseline::new(local, remote);
-        let (download, upload) = (NetworkBandwitdth::Kbps(0.5), NetworkBandwitdth::Kbps(0.5));
+        let (download, upload) = (Bandwidth::Kbps(0.5), Bandwidth::Kbps(0.5));
         let mut tracker = DefaultTracker::new(download, upload);
 
         baseline.sync(&mut tracker);
 
-        let bytes: Vec<_> = tracker.events().iter().map(NetworkEvent::bytes).collect();
+        let bytes: Vec<_> = tracker.events().iter().map(DefaultEvent::bytes).collect();
         assert_eq!(bytes, vec![30, 35]);
         assert_eq!(tracker.diffs(), 0);
     }

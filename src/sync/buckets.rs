@@ -2,7 +2,7 @@ use std::{collections::HashMap, hash::RandomState, iter::zip, mem};
 
 use crate::{
     crdt::{Decomposable, Extractable, Measurable},
-    tracker::{DefaultTracker, NetworkEvent, Tracker},
+    tracker::{DefaultEvent, DefaultTracker, Tracker},
 };
 
 use super::{Dispatcher, Protocol};
@@ -47,10 +47,11 @@ where
         let local_buckets = self.dispatch(&self.local, self.buckets, &hasher);
         let local_hashes = Buckets::<T>::hashes(&local_buckets, &hasher);
 
-        tracker.register(NetworkEvent::local_to_remote(
-            tracker.upload(),
-            mem::size_of_val(local_hashes.as_slice()),
-        ));
+        tracker.register(DefaultEvent::LocalToRemote {
+            state: 0,
+            metadata: mem::size_of_val(local_hashes.as_slice()),
+            upload: tracker.upload(),
+        });
 
         // 2. Repeat the procedure from 1., but now on the remote replica.
         let remote_buckets = self.dispatch(&self.remote, self.buckets, &hasher);
@@ -72,13 +73,11 @@ where
             })
             .collect::<HashMap<_, _>>();
 
-        tracker.register(NetworkEvent::remote_to_local(
-            tracker.download(),
-            non_matching
-                .iter()
-                .map(|(i, r)| mem::size_of_val(i) + <T as Measurable>::size_of(r))
-                .sum(),
-        ));
+        tracker.register(DefaultEvent::RemoteToLocal {
+            state: non_matching.values().map(<T as Measurable>::size_of).sum(),
+            metadata: non_matching.keys().count() * mem::size_of::<usize>(),
+            download: tracker.download(),
+        });
 
         // 4. Compute the differences between buckets against both the local and remote
         //    decompositions. Then send the difference unknown by remote replica.
@@ -104,10 +103,11 @@ where
             .map(|(i, remote)| local_buckets.get(i).unwrap().difference(remote))
             .collect::<Vec<_>>();
 
-        tracker.register(NetworkEvent::local_to_remote(
-            tracker.upload(),
-            remote_unknown.iter().map(<T as Measurable>::size_of).sum(),
-        ));
+        tracker.register(DefaultEvent::LocalToRemote {
+            state: remote_unknown.iter().map(<T as Measurable>::size_of).sum(),
+            metadata: 0,
+            upload: tracker.upload(),
+        });
 
         // 5. Join the appropriate join-decompositions to each replica.
         self.local.join(local_unknown.collect());
@@ -123,7 +123,7 @@ mod tests {
     use std::mem;
 
     use super::*;
-    use crate::{crdt::GSet, tracker::NetworkBandwitdth};
+    use crate::{crdt::GSet, tracker::Bandwidth};
 
     #[test]
     fn test_sync() {
@@ -156,12 +156,12 @@ mod tests {
         let buckets = (1.25 * local.len() as f64) as usize;
         let mut baseline = Buckets::new(local, remote, buckets);
 
-        let (download, upload) = (NetworkBandwitdth::Kbps(0.5), NetworkBandwitdth::Kbps(0.5));
+        let (download, upload) = (Bandwidth::Kbps(0.5), Bandwidth::Kbps(0.5));
         let mut tracker = DefaultTracker::new(download, upload);
 
         baseline.sync(&mut tracker);
 
-        let bytes: Vec<_> = tracker.events().iter().map(NetworkEvent::bytes).collect();
+        let bytes: Vec<_> = tracker.events().iter().map(DefaultEvent::bytes).collect();
         assert_eq!(bytes[0], 11 * mem::size_of::<u64>());
         assert_eq!(tracker.diffs(), 0);
     }

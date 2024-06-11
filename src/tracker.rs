@@ -1,10 +1,13 @@
 use std::time::Duration;
 
-pub trait Event {}
 pub trait Tracker {
-    type Event: Event;
+    type Event;
 
     fn is_ready(&self) -> bool;
+
+    fn upload(&self) -> Bandwidth;
+    fn download(&self) -> Bandwidth;
+
     fn register(&mut self, event: Self::Event);
     fn events(&self) -> &Vec<Self::Event>;
     fn finish(&mut self, diffs: usize);
@@ -13,19 +16,19 @@ pub trait Tracker {
 
 /// Network Bandwidth value in bits per second.
 #[derive(Clone, Copy, Debug)]
-pub enum NetworkBandwitdth {
+pub enum Bandwidth {
     Kbps(f64),
     Mbps(f64),
     Gbps(f64),
 }
 
-impl NetworkBandwitdth {
+impl Bandwidth {
     #[inline]
     pub fn as_bytes_per_sec(&self) -> f64 {
         match self {
-            NetworkBandwitdth::Kbps(b) => b / 8.0 * 1_000.0,
-            NetworkBandwitdth::Mbps(b) => b / 8.0 * 1_000_000.0,
-            NetworkBandwitdth::Gbps(b) => b / 8.0 * 1_000_000_000.0,
+            Bandwidth::Kbps(b) => b / 8.0 * 1_000.0,
+            Bandwidth::Mbps(b) => b / 8.0 * 1_000_000.0,
+            Bandwidth::Gbps(b) => b / 8.0 * 1_000_000_000.0,
         }
     }
 }
@@ -34,83 +37,86 @@ impl NetworkBandwitdth {
 /// It holds the size of the transfered payload in Bytes and estimates the duration based on the
 /// bandwidth provided by the tracker that registers these kind of events.
 #[derive(Debug)]
-pub enum NetworkEvent {
-    LocalToRemote { bytes: usize, duration: Duration },
-    RemoteToLocal { bytes: usize, duration: Duration },
+pub enum DefaultEvent {
+    LocalToRemote {
+        state: usize,
+        metadata: usize,
+        upload: Bandwidth,
+    },
+    RemoteToLocal {
+        state: usize,
+        metadata: usize,
+        download: Bandwidth,
+    },
 }
 
-impl NetworkEvent {
+impl DefaultEvent {
     #[inline]
-    #[must_use]
-    pub fn local_to_remote(upload: NetworkBandwitdth, bytes: usize) -> Self {
-        let bandwidth = upload.as_bytes_per_sec();
-        assert!(
-            bandwidth > 0.0,
-            "upload should be greater than 0 bytes per second"
-        );
-
-        Self::LocalToRemote {
-            bytes,
-            duration: Duration::from_secs_f64(bytes as f64 / bandwidth),
+    pub const fn state(&self) -> usize {
+        match &self {
+            Self::LocalToRemote { state, .. } => *state,
+            Self::RemoteToLocal { state, .. } => *state,
         }
     }
 
     #[inline]
-    #[must_use]
-    pub fn remote_to_local(download: NetworkBandwitdth, bytes: usize) -> Self {
-        let bandwidth = download.as_bytes_per_sec();
-        assert!(
-            bandwidth > 0.0,
-            "download should be greater than 0 bytes per second"
-        );
-
-        Self::RemoteToLocal {
-            bytes,
-            duration: Duration::from_secs_f64(bytes as f64 / bandwidth),
+    pub const fn metadata(&self) -> usize {
+        match &self {
+            Self::LocalToRemote { metadata, .. } => *metadata,
+            Self::RemoteToLocal { metadata, .. } => *metadata,
         }
     }
 
     #[inline]
-    pub fn bytes(&self) -> usize {
-        match self {
-            Self::LocalToRemote { bytes, .. } => *bytes,
-            Self::RemoteToLocal { bytes, .. } => *bytes,
+    pub const fn bytes(&self) -> usize {
+        self.state() + self.metadata()
+    }
+
+    #[inline]
+    pub const fn upload(&self) -> Bandwidth {
+        match &self {
+            Self::LocalToRemote { upload, .. } => *upload,
+            _ => unreachable!(),
         }
     }
 
     #[inline]
-    pub fn duration(&self) -> Duration {
-        match self {
-            Self::LocalToRemote { duration, .. } => *duration,
-            Self::RemoteToLocal { duration, .. } => *duration,
+    pub const fn download(&self) -> Bandwidth {
+        match &self {
+            Self::RemoteToLocal { download, .. } => *download,
+            _ => unreachable!(),
+        }
+    }
+
+    #[inline]
+    pub fn duration(&self) -> Result<Duration, Duration> {
+        let link = match &self {
+            Self::LocalToRemote { upload, .. } => *upload,
+            Self::RemoteToLocal { download, .. } => *download,
+        }
+        .as_bytes_per_sec();
+
+        if link > 0.0 {
+            Ok(Duration::from_secs_f64(self.bytes() as f64 / link))
+        } else {
+            Err(Duration::ZERO)
         }
     }
 }
-
-impl Event for NetworkEvent {}
 
 /// Default [`Tracker`] for operations over the Network.
 #[derive(Debug)]
 pub struct DefaultTracker {
-    events: Vec<NetworkEvent>,
+    events: Vec<DefaultEvent>,
     diffs: Option<usize>,
-    download: NetworkBandwitdth,
-    upload: NetworkBandwitdth,
+    download: Bandwidth,
+    upload: Bandwidth,
 }
 
 impl DefaultTracker {
     #[inline]
     #[must_use]
-    pub fn new(download: NetworkBandwitdth, upload: NetworkBandwitdth) -> Self {
-        assert!(
-            download.as_bytes_per_sec() > 0.0,
-            "download should be greater than 0 bytes per second"
-        );
-        assert!(
-            upload.as_bytes_per_sec() > 0.0,
-            "upload should be greater than 0 bytes per second"
-        );
-
+    pub fn new(download: Bandwidth, upload: Bandwidth) -> Self {
         Self {
             events: vec![],
             diffs: None,
@@ -118,23 +124,21 @@ impl DefaultTracker {
             upload,
         }
     }
-
-    #[inline]
-    pub fn download(&self) -> NetworkBandwitdth {
-        self.download
-    }
-
-    #[inline]
-    pub fn upload(&self) -> NetworkBandwitdth {
-        self.upload
-    }
 }
 
 impl Tracker for DefaultTracker {
-    type Event = NetworkEvent;
+    type Event = DefaultEvent;
 
     fn is_ready(&self) -> bool {
         self.events.is_empty() && self.diffs.is_none()
+    }
+
+    fn download(&self) -> Bandwidth {
+        self.download
+    }
+
+    fn upload(&self) -> Bandwidth {
+        self.upload
     }
 
     fn register(&mut self, event: Self::Event) {
