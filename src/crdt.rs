@@ -3,6 +3,7 @@ use std::{
     hash::Hash,
 };
 
+use either::*;
 use rand::Rng;
 
 pub trait Decomposable {
@@ -11,6 +12,12 @@ pub trait Decomposable {
     fn split(&self) -> Vec<Self::Decomposition>;
     fn join(&mut self, deltas: Vec<Self::Decomposition>);
     fn difference(&self, remote: &Self::Decomposition) -> Self::Decomposition;
+}
+
+pub trait Extractable {
+    type Item: Hash;
+
+    fn get(&self) -> Self::Item;
 }
 
 pub trait Measurable {
@@ -123,6 +130,23 @@ where
         Self {
             base: self.base.difference(&remote.base).cloned().collect(),
         }
+    }
+}
+
+impl<T> Extractable for GSet<T>
+where
+    T: Clone + Eq + Hash,
+{
+    type Item = T;
+
+    fn get(&self) -> Self::Item {
+        assert_eq!(
+            self.len(),
+            1,
+            "a join-decomposition should have a single item"
+        );
+
+        self.base.iter().cloned().next().unwrap()
     }
 }
 
@@ -343,6 +367,39 @@ where
                 .map(|(id, v)| (*id, v.clone()))
                 .collect(),
             removed: self.removed.difference(&remote.removed).cloned().collect(),
+        }
+    }
+}
+
+impl<T> Extractable for AWSet<T>
+where
+    T: Clone + Eq + Hash,
+{
+    type Item = Either<(u64, T), u64>;
+
+    fn get(&self) -> Self::Item {
+        if self.removed.is_empty() {
+            assert_eq!(
+                self.inserted.len(),
+                1,
+                "a join-decomposition should have a single item"
+            );
+
+            Left(
+                self.inserted
+                    .iter()
+                    .map(|(id, v)| (*id, v.clone()))
+                    .next()
+                    .unwrap(),
+            )
+        } else {
+            assert_eq!(
+                self.removed.len(),
+                1,
+                "a join-decomposition should have a single item"
+            );
+
+            Right(self.removed.iter().cloned().next().unwrap())
         }
     }
 }
