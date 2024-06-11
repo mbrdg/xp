@@ -1,6 +1,7 @@
 use std::{
     collections::{HashMap, HashSet},
     hash::Hash,
+    mem,
 };
 
 use either::*;
@@ -21,6 +22,10 @@ pub trait Extractable {
 }
 
 pub trait Measurable {
+    fn len(replica: &Self) -> usize
+    where
+        Self: Decomposable;
+
     fn size_of(replica: &Self) -> usize;
     fn false_matches(&self, other: &Self) -> usize;
 }
@@ -151,8 +156,12 @@ where
 }
 
 impl Measurable for GSet<String> {
+    fn len(replica: &Self) -> usize {
+        replica.len()
+    }
+
     fn size_of(replica: &Self) -> usize {
-        replica.base.iter().map(String::len).sum()
+        replica.elements().map(String::len).sum()
     }
 
     fn false_matches(&self, other: &Self) -> usize {
@@ -405,13 +414,14 @@ where
 }
 
 impl Measurable for AWSet<String> {
+    fn len(replica: &Self) -> usize {
+        replica.inserted.len() + replica.removed.len()
+    }
+
     fn size_of(replica: &Self) -> usize {
-        replica
-            .inserted
-            .iter()
-            .filter_map(|(id, v)| (!replica.removed.contains(id)).then_some(v))
-            .map(String::len)
-            .sum()
+        replica.inserted.len() * mem::size_of::<u64>()
+            + replica.inserted.values().map(String::len).sum::<usize>()
+            + replica.removed.len() * mem::size_of::<u64>()
     }
 
     fn false_matches(&self, other: &Self) -> usize {
