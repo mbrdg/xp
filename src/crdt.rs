@@ -126,10 +126,6 @@ where
 }
 
 impl Measurable for GSet<String> {
-    fn query(&self) -> HashSet<String> {
-        self.elements()
-    }
-
     fn size_of(replica: &Self) -> usize {
         replica.base.iter().map(String::len).sum()
     }
@@ -174,7 +170,6 @@ mod gset {
         assert!(joinable.contains(&2));
 
         joinable.insert(3);
-        assert_eq!(joinable.elements(), HashSet::from_iter(1..=3));
     }
 
     #[test]
@@ -358,6 +353,18 @@ impl<T> AWSet<T> {
     }
 
     #[inline]
+    pub fn elements(&self) -> Elements<'_, T> {
+        Elements {
+            elems: self
+                .inserted
+                .iter()
+                .filter_map(|(id, v)| (!self.removed.contains(id)).then_some(v))
+                .collect(),
+            idx: 0,
+        }
+    }
+
+    #[inline]
     pub fn is_empty(&self) -> bool {
         !self.inserted.keys().any(|id| !self.removed.contains(id))
     }
@@ -381,30 +388,6 @@ where
             .iter()
             .any(|(id, v)| value == v && !self.removed.contains(id))
     }
-}
-
-impl<T> AWSet<T>
-where
-    T: Clone + Eq + Hash,
-{
-    #[inline]
-    pub fn elements(&self) -> HashSet<T> {
-        self.inserted
-            .iter()
-            .filter_map(|(id, value)| (!self.removed.contains(id)).then_some(value))
-            .cloned()
-            .collect()
-    }
-
-    pub fn insert(&mut self, value: T) -> Self {
-        let id = max(self.inserted.keys().max(), self.removed.iter().max()).unwrap_or(&0) + 1;
-        self.inserted.insert(id, value.clone());
-
-        Self {
-            inserted: HashMap::from([(id, value)]),
-            removed: HashSet::new(),
-        }
-    }
 
     pub fn remove(&mut self, value: &T) -> Self {
         let id = self
@@ -426,6 +409,21 @@ where
                 inserted: HashMap::new(),
                 removed: HashSet::new(),
             }
+        }
+    }
+}
+
+impl<T> AWSet<T>
+where
+    T: Clone + Eq + Hash,
+{
+    pub fn insert(&mut self, value: T) -> Self {
+        let id = max(self.inserted.keys().max(), self.removed.iter().max()).unwrap_or(&0) + 1;
+        self.inserted.insert(id, value.clone());
+
+        Self {
+            inserted: HashMap::from([(id, value)]),
+            removed: HashSet::new(),
         }
     }
 }
@@ -471,10 +469,6 @@ where
 }
 
 impl Measurable for AWSet<String> {
-    fn query(&self) -> HashSet<String> {
-        self.elements()
-    }
-
     fn size_of(replica: &Self) -> usize {
         replica
             .inserted
@@ -485,18 +479,19 @@ impl Measurable for AWSet<String> {
     }
 
     fn false_matches(&self, other: &Self) -> usize {
-        self.inserted
+        let self_minus_other = self
+            .inserted
             .iter()
             .filter_map(|(id, v)| (!self.removed.contains(id)).then_some(v))
-            .filter(|v| !other.contains(v))
-            .chain(
-                other
-                    .inserted
-                    .iter()
-                    .filter_map(|(id, v)| (!other.removed.contains(id)).then_some(v))
-                    .filter(|v| !self.contains(v)),
-            )
-            .count()
+            .filter(|v| !other.contains(v));
+
+        let other_minus_self = other
+            .inserted
+            .iter()
+            .filter_map(|(id, v)| (!other.removed.contains(id)).then_some(v))
+            .filter(|v| !self.contains(v));
+
+        self_minus_other.count() + other_minus_self.count()
     }
 }
 
@@ -542,7 +537,6 @@ mod awset {
         awset.insert(2);
         awset.insert(4);
         assert_eq!(awset.len(), 4);
-        assert_eq!(awset.elements(), HashSet::from_iter(1..=4));
     }
 
     #[test]
