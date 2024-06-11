@@ -13,10 +13,27 @@ pub trait Decomposable {
 }
 
 pub trait Measurable {
-    // FIXME: Query should be part of its own trait.
-    fn query(&self) -> HashSet<String>;
     fn size_of(replica: &Self) -> usize;
     fn false_matches(&self, other: &Self) -> usize;
+}
+
+#[derive(PartialEq, Eq, Debug, Default)]
+pub struct Elements<'a, T> {
+    elems: Vec<&'a T>,
+    idx: usize,
+}
+
+impl<'a, T> Iterator for Elements<'a, T> {
+    type Item = &'a T;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.idx >= self.elems.len() {
+            return None;
+        }
+
+        self.idx += 1;
+        Some(&self.elems[self.idx])
+    }
 }
 
 #[derive(Clone, Debug, Default)]
@@ -59,8 +76,11 @@ where
     T: Clone + Eq + Hash,
 {
     #[inline]
-    pub fn elements(&self) -> HashSet<T> {
-        self.base.clone()
+    pub fn elements(&self) -> Elements<'_, T> {
+        Elements {
+            elems: self.base.iter().collect(),
+            idx: 0,
+        }
     }
 
     pub fn insert(&mut self, value: T) -> Self {
