@@ -1,41 +1,29 @@
 use crate::{
-    crdt::{Decomposable, Measurable},
+    crdt::{Decomposable, Extractable, Measurable},
     tracker::{DefaultTracker, NetworkEvent, Tracker},
 };
 
-use super::{Bloomer, Protocol};
+use super::{BloomBased, Protocol};
 
 pub struct Bloom<T> {
-    bloomer: Bloomer<T>,
     local: T,
     remote: T,
+    fpr: f64,
 }
 
 impl<T> Bloom<T> {
     #[inline]
     #[must_use]
-    pub fn new(local: T, remote: T) -> Self {
-        Self {
-            bloomer: Bloomer::new(0.01),
-            local,
-            remote,
-        }
-    }
-
-    #[inline]
-    #[must_use]
-    pub fn with_bloomer(local: T, remote: T, bloomer: Bloomer<T>) -> Self {
-        Self {
-            local,
-            remote,
-            bloomer,
-        }
+    pub fn new(local: T, remote: T, fpr: f64) -> Self {
+        Self { local, remote, fpr }
     }
 }
 
+impl<T> BloomBased<T> for Bloom<T> where T: Extractable {}
+
 impl<T> Protocol for Bloom<T>
 where
-    T: Clone + Decomposable<Decomposition = T> + Measurable,
+    T: Decomposable<Decomposition = T> + Extractable + Measurable,
 {
     type Tracker = DefaultTracker;
 
@@ -47,24 +35,24 @@ where
 
         // 1. Create a filter from the local join-deocompositions and send it to the remote replica.
         let local_split = self.local.split();
-        let local_filter = self.bloomer.filter_from(&local_split);
+        let local_filter = self.filter_from(&local_split, self.fpr);
 
         tracker.register(NetworkEvent::local_to_remote(
             tracker.upload(),
-            Bloomer::size_of(&local_filter),
+            <Self as BloomBased<T>>::size_of(&local_filter),
         ));
 
         // 2. Partion the remote join-decompositions into *probably* present in both replicas or
         //    *definitely not* present in the local replica.
-        let (common, local_unknown) = self.bloomer.partition(&local_filter, self.remote.split());
+        let (common, local_unknown) = self.partition(&local_filter, self.remote.split());
 
         // 3. Build a filter from the partion of *probably* common join-decompositions and send it
         //    to the local replica. For pipelining, the remaining decompositions are also sent.
-        let remote_filter = self.bloomer.filter_from(&common);
+        let remote_filter = self.filter_from(&common, self.fpr);
 
         tracker.register(NetworkEvent::remote_to_local(
             tracker.download(),
-            Bloomer::size_of(&remote_filter)
+            <Self as BloomBased<T>>::size_of(&remote_filter)
                 + local_unknown
                     .iter()
                     .map(<T as Measurable>::size_of)
@@ -73,7 +61,7 @@ where
 
         // 4. Do the same procedure as in 2., but this time in the local replica. This determines
         //    *not all* join-decompositions that are unknown by the remote replica.
-        let remote_unknown = self.bloomer.partition(&remote_filter, local_split).1;
+        let remote_unknown = self.partition(&remote_filter, local_split).1;
 
         tracker.register(NetworkEvent::local_to_remote(
             tracker.upload(),

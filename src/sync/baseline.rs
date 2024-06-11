@@ -10,10 +10,7 @@ pub struct Baseline<T> {
     remote: T,
 }
 
-impl<T> Baseline<T>
-where
-    T: Decomposable + Measurable,
-{
+impl<T> Baseline<T> {
     #[inline]
     #[must_use]
     pub fn new(local: T, remote: T) -> Self {

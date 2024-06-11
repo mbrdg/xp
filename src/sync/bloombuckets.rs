@@ -1,35 +1,41 @@
-use std::{collections::HashMap, iter::zip, mem};
+use std::{collections::HashMap, hash::RandomState, iter::zip, mem};
 
 use crate::{
-    crdt::{Decomposable, Measurable},
+    crdt::{Decomposable, Extractable, Measurable},
     tracker::{DefaultTracker, NetworkEvent, Tracker},
 };
 
-use super::{Bloomer, BucketDispatcher, Protocol};
+use super::{BloomBased, Dispatcher, Protocol};
 
 pub struct BloomBuckets<T> {
-    bloomer: Bloomer<T>,
-    dispatcher: BucketDispatcher<T>,
     local: T,
     remote: T,
+    fpr: f64,
+    buckets: usize,
 }
 
 impl<T> BloomBuckets<T> {
     #[inline]
     #[must_use]
-    pub fn new(local: T, remote: T, bloomer: Bloomer<T>, dispatcher: BucketDispatcher<T>) -> Self {
+    pub fn new(local: T, remote: T, fpr: f64, buckets: usize) -> Self {
         Self {
-            bloomer,
-            dispatcher,
             local,
             remote,
+            fpr,
+            buckets,
         }
     }
 }
 
+impl<T> BloomBased<T> for BloomBuckets<T> where T: Extractable {}
+impl<T> Dispatcher<T> for BloomBuckets<T> where
+    T: Clone + Decomposable<Decomposition = T> + Extractable
+{
+}
+
 impl<T> Protocol for BloomBuckets<T>
 where
-    T: Clone + Decomposable<Decomposition = T> + Default + Measurable,
+    T: Clone + Decomposable<Decomposition = T> + Default + Extractable + Measurable,
 {
     type Tracker = DefaultTracker;
 
@@ -39,31 +45,32 @@ where
             "tracker should be ready, i.e., no captured events and not finished"
         );
 
+        let hasher = RandomState::new();
+
         // 1. Create a filter from the local join-deocompositions and send it to the remote replica.
         let local_decompositions = self.local.split();
-        let local_filter = self.bloomer.filter_from(&local_decompositions);
+        let local_filter = self.filter_from(&local_decompositions, self.fpr);
 
         tracker.register(NetworkEvent::local_to_remote(
             tracker.upload(),
-            Bloomer::size_of(&local_filter),
+            <Self as BloomBased<T>>::size_of(&local_filter),
         ));
 
         // 2. Partion the remote join-decompositions into *probably* present in both replicas or
         //    *definitely not* present in the local replica.
-        let (remote_common, local_unknown) =
-            self.bloomer.partition(&local_filter, self.remote.split());
+        let (remote_common, local_unknown) = self.partition(&local_filter, self.remote.split());
 
         // 3. Build a filter from the partion of *probably* common join-decompositions and send it
         //    to the local replica. At this stage the remote replica also constructs its buckets.
         //    For pipelining, the remaining decompositions and bucket's hashes are also sent.
-        let remote_filter = self.bloomer.filter_from(&remote_common);
+        let remote_filter = self.filter_from(&remote_common, self.fpr);
         let remote_buckets = {
             let mut state = T::default();
             state.join(remote_common);
 
-            self.dispatcher.dispatch(&state)
+            self.dispatch(&state, self.buckets, &hasher)
         };
-        let remote_hashes = self.dispatcher.hashes(&remote_buckets);
+        let remote_hashes = BloomBuckets::<T>::hashes(&remote_buckets, &hasher);
 
         tracker.register(NetworkEvent::remote_to_local(
             tracker.download(),
@@ -71,15 +78,14 @@ where
                 .iter()
                 .map(<T as Measurable>::size_of)
                 .sum::<usize>()
-                + Bloomer::size_of(&remote_filter)
+                + <Self as BloomBased<T>>::size_of(&remote_filter)
                 + mem::size_of_val(remote_hashes.as_slice()),
         ));
 
         // 3. Compute the buckets whose hash does not match on the local replica and send those
         //    buckets back to the remote replica together with all the decompositions that are
         //    *definitely not* on the remote replica.
-        let (local_common, remote_unknown) =
-            self.bloomer.partition(&remote_filter, local_decompositions);
+        let (local_common, remote_unknown) = self.partition(&remote_filter, local_decompositions);
 
         // Assign each join-decomposition from the set of *probably* common join-decompositions to
         // a bucket based on the modulo of its hash and send the hashes to the remote replica.
@@ -88,9 +94,9 @@ where
             let mut state = T::default();
             state.join(local_common);
 
-            self.dispatcher.dispatch(&state)
+            self.dispatch(&state, self.buckets, &hasher)
         };
-        let local_hashes = self.dispatcher.hashes(&local_buckets);
+        let local_hashes = BloomBuckets::<T>::hashes(&local_buckets, &hasher);
 
         let non_matching = local_buckets
             .into_iter()
@@ -199,9 +205,8 @@ mod tests {
             gset
         };
 
-        let bloomer = Bloomer::new(0.01);
-        let dispatcher = BucketDispatcher::new((1.01 * local.len() as f64) as usize);
-        let mut baseline = BloomBuckets::new(local, remote, bloomer, dispatcher);
+        let buckets = local.len();
+        let mut baseline = BloomBuckets::new(local, remote, 0.01, buckets);
 
         let (download, upload) = (NetworkBandwitdth::Kbps(0.5), NetworkBandwitdth::Kbps(0.5));
         let mut tracker = DefaultTracker::new(download, upload);

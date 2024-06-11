@@ -1,33 +1,35 @@
-use std::{collections::HashMap, iter::zip, mem};
+use std::{collections::HashMap, hash::RandomState, iter::zip, mem};
 
 use crate::{
-    crdt::{Decomposable, Measurable},
+    crdt::{Decomposable, Extractable, Measurable},
     tracker::{DefaultTracker, NetworkEvent, Tracker},
 };
 
-use super::{BucketDispatcher, Protocol};
+use super::{Dispatcher, Protocol};
 
 pub struct Buckets<T> {
-    dispatcher: BucketDispatcher<T>,
     local: T,
     remote: T,
+    buckets: usize,
 }
 
 impl<T> Buckets<T> {
     #[inline]
     #[must_use]
-    pub fn new(local: T, remote: T, dispatcher: BucketDispatcher<T>) -> Self {
+    pub fn new(local: T, remote: T, buckets: usize) -> Self {
         Self {
             local,
             remote,
-            dispatcher,
+            buckets,
         }
     }
 }
 
+impl<T> Dispatcher<T> for Buckets<T> where T: Clone + Decomposable<Decomposition = T> + Extractable {}
+
 impl<T> Protocol for Buckets<T>
 where
-    T: Clone + Decomposable<Decomposition = T> + Default + Measurable,
+    T: Clone + Decomposable<Decomposition = T> + Default + Extractable + Measurable,
 {
     type Tracker = DefaultTracker;
 
@@ -37,11 +39,13 @@ where
             "tracker should be ready, i.e., no captured events and not finished"
         );
 
+        let hasher = RandomState::new();
+
         // 1. Assign each join-decomposition to a bucket based on the modulo of its hash and send
         //    the hashes to the remote replica.
         // NOTE: This policy must be deterministic across both peers.
-        let local_buckets = self.dispatcher.dispatch(&self.local);
-        let local_hashes = self.dispatcher.hashes(&local_buckets);
+        let local_buckets = self.dispatch(&self.local, self.buckets, &hasher);
+        let local_hashes = Buckets::<T>::hashes(&local_buckets, &hasher);
 
         tracker.register(NetworkEvent::local_to_remote(
             tracker.upload(),
@@ -49,8 +53,8 @@ where
         ));
 
         // 2. Repeat the procedure from 1., but now on the remote replica.
-        let remote_buckets = self.dispatcher.dispatch(&self.remote);
-        let remote_hashes = self.dispatcher.hashes(&remote_buckets);
+        let remote_buckets = self.dispatch(&self.remote, self.buckets, &hasher);
+        let remote_hashes = Buckets::<T>::hashes(&remote_buckets, &hasher);
 
         // 3. Compute the buckets whose hash does not match on the remote replica and send those
         //    buckets back to the local replica.
@@ -149,8 +153,8 @@ mod tests {
             gset
         };
 
-        let dispatcher = BucketDispatcher::new((1.25 * local.len() as f64) as usize);
-        let mut baseline = Buckets::new(local, remote, dispatcher);
+        let buckets = (1.25 * local.len() as f64) as usize;
+        let mut baseline = Buckets::new(local, remote, buckets);
 
         let (download, upload) = (NetworkBandwitdth::Kbps(0.5), NetworkBandwitdth::Kbps(0.5));
         let mut tracker = DefaultTracker::new(download, upload);
