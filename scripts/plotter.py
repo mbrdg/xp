@@ -65,6 +65,11 @@ def read_experiments(f: TextIOWrapper) -> list[Experiment]:
     return [Experiment(*p) for p in zip(envs, collector)]
 
 
+def fmt_label(label: str) -> str:
+    """Simple label format to be displayed in legend"""
+    return label.replace("[", " [").replace(",", ", ")
+
+
 def plot_transmitted_data(experiment: Experiment):
     """Plots the transmitted data (total and metadata) over the network for each protocol"""
     _, axes = plt.subplots(ncols=2, figsize=(6.4 * 2, 4.8), layout="constrained")
@@ -73,20 +78,23 @@ def plot_transmitted_data(experiment: Experiment):
         ax.xaxis.set_major_formatter(percent_formatter)
         ax.yaxis.set_major_formatter(byte_formatter)
         ax.grid(linestyle="--", linewidth=0.5, alpha=0.5)
-        ax.set(xlabel="Similarity", xmargin=0)
+        ax.set(xlabel="Similarity", xmargin=0.02)
 
     axes[0].set(ylabel="Total Transmitted (Bytes)")
     axes[1].set(ylabel="Metadata Transmitted (Bytes)")
 
     for proto, metrics in experiment.runs.items():
         transmitted = [m.state + m.metadata for m in metrics]
-        axes[0].plot(similarities, transmitted, marker="o", linewidth=.75, label=proto)
+        label = fmt_label(proto)
+        p = axes[0].plot(similarities, transmitted, marker="o", label=label)
 
-        metadata = [m.metadata for m in metrics]
-        axes[1].plot(similarities, metadata, marker="o", linewidth=.75, label=proto)
+        if proto != "Baseline":
+            metadata = [m.metadata for m in metrics]
+            color = p[-1].get_color()
+            axes[1].plot(similarities, metadata, marker="o", label=label, color=color)
 
-    axes[0].legend(fontsize="x-small")
-    axes[1].legend(fontsize="x-small")
+    axes[0].legend()
+    axes[1].legend()
 
     plt.show()
 
@@ -102,13 +110,14 @@ def plot_time_to_sync(experiments: list[Experiment]):
 
         ax.xaxis.set_major_formatter(percent_formatter)
         ax.grid(linestyle="--", linewidth=0.5, alpha=0.5)
-        ax.set(xlabel="Similarity", xmargin=0, ylabel=ylabel)
+        ax.set(xlabel="Similarity", ylabel=ylabel)
 
         for proto, metrics in runs.items():
             time = [m.duration for m in metrics]
-            ax.plot(similarities, time, marker="o", label=proto)
+            label = fmt_label(proto)
+            ax.plot(similarities, time, marker="o", label=label)
 
-        ax.legend(fontsize="x-small")
+        ax.legend()
 
     plt.show()
 
@@ -122,7 +131,7 @@ def main():
     args = parser.parse_args()
 
     # Set global configs for plotting
-    plt.style.use("seaborn-v0_8-colorblind")
+    plt.style.use("seaborn-v0_8-paper")
     plt.rc("font", family="serif")
 
     # File reading
