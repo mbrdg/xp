@@ -202,7 +202,7 @@ where
         let mut protocol = Baseline::new(local.clone(), remote.clone());
         run(&mut protocol, "Baseline", similar, download, upload);
 
-        for load in [0.2, 1.0, 5.0] {
+        for load in [1.0, 5.0] {
             let id = format!("Buckets[lf={load}]");
             let num_buckets = (load * <T as Measurable>::len(&local) as f64) as usize;
             let mut protocol = Buckets::new(local.clone(), remote.clone(), num_buckets);
@@ -210,13 +210,15 @@ where
             run(&mut protocol, &id, similar, download, upload);
         }
 
-        for fpr in [0.2, 1.0, 5.0] {
-            let id = format!("BloomBuckets[lf=1.0,fpr={fpr:.1}%]");
-            let num_buckets = <T as Measurable>::len(&local);
-            let mut protocol =
-                BloomBuckets::new(local.clone(), remote.clone(), fpr / 100.0, num_buckets);
+        for fpr in [1.0, 20.0] {
+            for load in [1.0, 5.0] {
+                let id = format!("BloomBuckets[lf={load},fpr={fpr}%]");
+                let num_buckets = (load * <T as Measurable>::len(&local) as f64) as usize;
+                let mut protocol =
+                    BloomBuckets::new(local.clone(), remote.clone(), fpr / 100.0, num_buckets);
 
-            run(&mut protocol, &id, similar, download, upload);
+                run(&mut protocol, &id, similar, download, upload);
+            }
         }
     }
 }
@@ -252,5 +254,5 @@ fn main() {
         let (local, remote) = awsets_with(25_000, s, 0.2, &mut rng);
         run_with(s, local, remote)
     });
-    eprintln!("[{:.?}] awsets done, exiting...", exec_time.elapsed());
+    eprintln!("[{:?}] awsets done, exiting...", exec_time.elapsed());
 }
