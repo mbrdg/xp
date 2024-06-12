@@ -66,19 +66,28 @@ def read_experiments(f: TextIOWrapper) -> list[Experiment]:
 
 
 def plot_transmitted_data(experiment: Experiment):
-    """Plots the transmitted data over the network for each protocol"""
-    _, ax = plt.subplots(layout="constrained")
+    """Plots the transmitted data (total and metadata) over the network for each protocol"""
+    _, axes = plt.subplots(ncols=2, figsize=(6.4 * 2, 4.8), layout="constrained")
 
-    ax.xaxis.set_major_formatter(percent_formatter)
-    ax.yaxis.set_major_formatter(byte_formatter)
-    ax.grid(linestyle="--", linewidth=0.5, alpha=0.5)
-    ax.set(xlabel="Similarity", xmargin=0, ylabel="Transmitted (Bytes)")
+    for ax in axes:
+        ax.xaxis.set_major_formatter(percent_formatter)
+        ax.yaxis.set_major_formatter(byte_formatter)
+        ax.grid(linestyle="--", linewidth=0.5, alpha=0.5)
+        ax.set(xlabel="Similarity", xmargin=0)
+
+    axes[0].set(ylabel="Total Transmitted (Bytes)")
+    axes[1].set(ylabel="Metadata Transmitted (Bytes)")
 
     for proto, metrics in experiment.runs.items():
         transmitted = [m.state + m.metadata for m in metrics]
-        ax.plot(similarities, transmitted, marker="o", label=proto)
+        axes[0].plot(similarities, transmitted, marker="o", linewidth=.75, label=proto)
 
-    ax.legend(fontsize="x-small")
+        metadata = [m.metadata for m in metrics]
+        axes[1].plot(similarities, metadata, marker="o", linewidth=.75, label=proto)
+
+    axes[0].legend(fontsize="x-small")
+    axes[1].legend(fontsize="x-small")
+
     plt.show()
 
 
