@@ -19,13 +19,16 @@ pub enum Bandwidth {
 }
 
 impl Bandwidth {
-    #[inline]
-    pub fn as_bytes_per_sec(&self) -> f64 {
+    pub fn bits_per_sec(&self) -> f64 {
         match self {
-            Bandwidth::Kbps(b) => b / 8.0 * 1_000.0,
-            Bandwidth::Mbps(b) => b / 8.0 * 1_000_000.0,
-            Bandwidth::Gbps(b) => b / 8.0 * 1_000_000_000.0,
+            Bandwidth::Kbps(b) => b * 1.0e3,
+            Bandwidth::Mbps(b) => b * 1.0e6,
+            Bandwidth::Gbps(b) => b * 1.0e9,
         }
+    }
+
+    pub fn bytes_per_sec(&self) -> f64 {
+        self.bits_per_sec() / 8.0
     }
 }
 
@@ -86,14 +89,14 @@ impl DefaultEvent {
 
     #[inline]
     pub fn duration(&self) -> Result<Duration, Duration> {
-        let link = match &self {
+        let bandwidth = match &self {
             Self::LocalToRemote { upload, .. } => *upload,
             Self::RemoteToLocal { download, .. } => *download,
         }
-        .as_bytes_per_sec();
+        .bytes_per_sec();
 
-        if link > 0.0 {
-            Ok(Duration::from_secs_f64(self.bytes() as f64 / link))
+        if bandwidth > 0.0 {
+            Ok(Duration::from_secs_f64(self.bytes() as f64 / bandwidth))
         } else {
             Err(Duration::ZERO)
         }
