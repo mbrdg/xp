@@ -1,11 +1,11 @@
 #![allow(dead_code)]
 
-use std::{time::Instant, usize};
+use std::time::{Duration, Instant};
 
 use crate::{
     crdt::{AWSet, GSet, Measurable},
-    sync::{baseline::Baseline, Protocol},
-    tracker::{Bandwidth, DefaultTracker, Tracker},
+    sync::{baseline::Baseline, bloombuckets::BloomBuckets, buckets::Buckets, Protocol},
+    tracker::{Bandwidth, DefaultEvent, DefaultTracker, Tracker},
 };
 
 use crdt::{Decomposable, Extractable};
@@ -15,7 +15,6 @@ use rand::{
     seq::IteratorRandom,
     SeedableRng,
 };
-use sync::{bloombuckets::BloomBuckets, buckets::Buckets};
 
 mod bloom;
 mod crdt;
@@ -150,11 +149,8 @@ fn awsets_with(
     (local, remote)
 }
 
-#[derive(Clone, Debug)]
-struct Status(usize, Bandwidth);
-
 /// Runs the specified protocol and outputs the metrics obtained.
-fn run<P>(proto: &mut P, id: &str, similar: f64, local_status: &Status, remote_status: &Status)
+fn run<P>(proto: &mut P, id: &str, similar: f64, download: Bandwidth, upload: Bandwidth)
 where
     P: Protocol<Tracker = DefaultTracker>,
 {
@@ -163,10 +159,7 @@ where
         "similarity should be a ratio between 0.0 and 1.0"
     );
 
-    let Status(size_of_local, upload) = local_status;
-    let Status(size_of_remote, download) = remote_status;
-
-    let mut tracker = DefaultTracker::new(*download, *upload);
+    let mut tracker = DefaultTracker::new(download, upload);
     proto.sync(&mut tracker);
 
     let diffs = tracker.diffs();
@@ -176,25 +169,23 @@ where
 
     let events = tracker.events();
     println!(
-        "{id} {} {size_of_local} {size_of_remote} {} {}",
-        events.len(),
-        upload.as_bytes_per_sec(),
-        download.as_bytes_per_sec(),
+        "{id} {} {} {:.3}",
+        events.iter().map(DefaultEvent::state).sum::<usize>(),
+        events.iter().map(DefaultEvent::metadata).sum::<usize>(),
+        events
+            .iter()
+            .filter_map(|e| e.duration().ok())
+            .sum::<Duration>()
+            .as_secs_f64(),
     );
-    events.iter().enumerate().for_each(|(i, e)| {
-        println!(
-            "{i} {} {} {:.3}",
-            e.state(),
-            e.metadata(),
-            e.duration().unwrap().as_secs_f64()
-        );
-    });
 }
 
 fn run_with<T>(similar: f64, local: T, remote: T)
 where
     T: Clone + Decomposable<Decomposition = T> + Default + Extractable + Measurable,
 {
+    let size_of_local = <T as Measurable>::size_of(&local);
+    let size_of_remote = <T as Measurable>::size_of(&remote);
     let links = [
         (Bandwidth::Mbps(10.0), Bandwidth::Mbps(1.0)),
         (Bandwidth::Mbps(10.0), Bandwidth::Mbps(10.0)),
@@ -202,28 +193,30 @@ where
     ];
 
     for (upload, download) in links {
-        let status = (
-            Status(<T as Measurable>::size_of(&local), upload),
-            Status(<T as Measurable>::size_of(&remote), download),
+        println!(
+            "\n{size_of_local} {} {size_of_remote} {}",
+            upload.bits_per_sec(),
+            download.bits_per_sec()
         );
-        let mut proto = Baseline::new(local.clone(), remote.clone());
-        run(&mut proto, "Baseline", similar, &status.0, &status.1);
+
+        let mut protocol = Baseline::new(local.clone(), remote.clone());
+        run(&mut protocol, "Baseline", similar, download, upload);
 
         for load in [0.2, 1.0, 5.0] {
             let id = format!("Buckets[lf={load}]");
             let num_buckets = (load * <T as Measurable>::len(&local) as f64) as usize;
-            let mut proto = Buckets::new(local.clone(), remote.clone(), num_buckets);
+            let mut protocol = Buckets::new(local.clone(), remote.clone(), num_buckets);
 
-            run(&mut proto, &id, similar, &status.0, &status.1);
+            run(&mut protocol, &id, similar, download, upload);
         }
 
         for fpr in [0.2, 1.0, 5.0] {
             let id = format!("BloomBuckets[lf=1.0,fpr={fpr:.1}%]");
             let num_buckets = <T as Measurable>::len(&local);
-            let mut proto =
+            let mut protocol =
                 BloomBuckets::new(local.clone(), remote.clone(), fpr / 100.0, num_buckets);
 
-            run(&mut proto, &id, similar, &status.0, &status.1);
+            run(&mut protocol, &id, similar, download, upload);
         }
     }
 }
