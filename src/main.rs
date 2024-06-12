@@ -1,6 +1,9 @@
 #![allow(dead_code)]
 
-use std::time::{Duration, Instant};
+use std::{
+    env,
+    time::{Duration, Instant},
+};
 
 use crate::{
     crdt::{AWSet, GSet, Measurable},
@@ -202,7 +205,7 @@ where
         let mut protocol = Baseline::new(local.clone(), remote.clone());
         run(&mut protocol, "Baseline", similar, download, upload);
 
-        for load in [1.0, 5.0] {
+        for load in [0.2, 1.0, 5.0] {
             let id = format!("Buckets[lf={load}]");
             let num_buckets = (load * <T as Measurable>::len(&local) as f64) as usize;
             let mut protocol = Buckets::new(local.clone(), remote.clone(), num_buckets);
@@ -210,15 +213,13 @@ where
             run(&mut protocol, &id, similar, download, upload);
         }
 
-        for fpr in [1.0, 20.0] {
-            for load in [1.0, 5.0] {
-                let id = format!("BloomBuckets[lf={load},fpr={fpr}%]");
-                let num_buckets = (load * <T as Measurable>::len(&local) as f64) as usize;
-                let mut protocol =
-                    BloomBuckets::new(local.clone(), remote.clone(), fpr / 100.0, num_buckets);
+        for fpr in [1.0, 25.0] {
+            let id = format!("BloomBuckets[lf=1,fpr={fpr}%]");
+            let num_buckets = <T as Measurable>::len(&local);
+            let mut protocol =
+                BloomBuckets::new(local.clone(), remote.clone(), fpr / 100.0, num_buckets);
 
-                run(&mut protocol, &id, similar, download, upload);
-            }
+            run(&mut protocol, &id, similar, download, upload);
         }
     }
 }
@@ -237,22 +238,30 @@ fn main() {
     let mut rng = StdRng::seed_from_u64(seed);
     eprintln!("[{:?}] got seed with value of {seed}", exec_time.elapsed());
 
-    (0..=100).step_by(10).for_each(|similar| {
-        let s = f64::from(similar) / 100.0;
-        let (local, remote) = gsets_with(100_000, s, &mut rng);
-        run_with(s, local, remote)
-    });
-    eprintln!("[{:?}] gsets done, going for awsets", exec_time.elapsed());
+    let args = env::args().collect::<Vec<_>>();
+    assert_eq!(args.len(), 2);
 
-    // NOTE: AWSets generated with 20% of elements removed. This value is pretty conservative for
-    // the particular study scenario of 15% of deleted or removed posts as in mainstream social
-    // media [1].
-    //
-    // [1]: https://www.researchgate.net/publication/367503309_Engagement_with_fact-checked_posts_on_Reddit
-    (0..=100).step_by(10).for_each(|similar| {
-        let s = f64::from(similar) / 100.0;
-        let (local, remote) = awsets_with(25_000, s, 0.2, &mut rng);
-        run_with(s, local, remote)
-    });
-    eprintln!("[{:?}] awsets done, exiting...", exec_time.elapsed());
+    let similarities = (0..=100)
+        .step_by(10)
+        .map(|similar| f64::from(similar) / 100.0);
+
+    match args[1].to_lowercase().as_str() {
+        "gset" => similarities.for_each(|s| {
+            let (local, remote) = gsets_with(100_000, s, &mut rng);
+            run_with(s, local, remote);
+        }),
+
+        // NOTE: AWSets generated with 20% of elements removed. This value is pretty conservative for
+        // the particular study scenario of 15% of deleted or removed posts as in mainstream social
+        // media [1].
+        //
+        // [1]: https://www.researchgate.net/publication/367503309_Engagement_with_fact-checked_posts_on_Reddit
+        "awset" => similarities.for_each(|s| {
+            let (local, remote) = awsets_with(20_000, s, 0.2, &mut rng);
+            run_with(s, local, remote);
+        }),
+        _ => unreachable!(),
+    };
+
+    eprintln!("[{:?}] exiting...", exec_time.elapsed());
 }
