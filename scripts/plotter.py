@@ -4,7 +4,9 @@
 import argparse
 from collections import defaultdict
 from io import TextIOWrapper
+import pathlib
 from typing import NamedTuple
+from matplotlib.figure import Figure
 import matplotlib.pyplot as plt
 from matplotlib import ticker
 
@@ -70,9 +72,9 @@ def fmt_label(label: str) -> str:
     return label.replace("[", " [").replace(",", ", ")
 
 
-def plot_transmitted_data(experiment: Experiment):
+def plot_transmitted_data(experiment: Experiment) -> Figure:
     """Plots the transmitted data (total and metadata) over the network for each protocol"""
-    _, axes = plt.subplots(ncols=2, figsize=(6.4 * 2, 4.8), layout="constrained")
+    fig, axes = plt.subplots(ncols=2, figsize=(6.4 * 2, 4.8), layout="constrained")
 
     for ax in axes:
         ax.xaxis.set_major_formatter(percent_formatter)
@@ -96,14 +98,13 @@ def plot_transmitted_data(experiment: Experiment):
     axes[0].legend()
     axes[1].legend()
 
-    plt.show()
+    return fig
 
 
-def plot_time_to_sync(experiments: list[Experiment]):
+def plot_time_to_sync(experiments: list[Experiment]) -> Figure:
     """Plots the time to sync on different link configurations"""
     assert len(experiments) == 3
-    _, axes = plt.subplots(ncols=3, figsize=(6.4 * 3, 4.8), layout="constrained")
-
+    fig, axes = plt.subplots(ncols=3, figsize=(6.4 * 3, 4.8), layout="constrained")
     for (env, runs), ax in zip(experiments, axes):
         up, down = bit_formatter(env.upload), bit_formatter(env.download)
         ylabel = f"Time to Sync (s)\n{up}/s up, {down}/s down"
@@ -119,27 +120,44 @@ def plot_time_to_sync(experiments: list[Experiment]):
 
         ax.legend()
 
-    plt.show()
+    return fig
 
 
 def main():
     """Script that extracts relevant data from logs and produces the plots for each experiment"""
     parser = argparse.ArgumentParser(prog="plotter")
-    parser.add_argument(
-        "filenames", nargs="*", default=("-"), type=argparse.FileType("r")
-    )
+    parser.add_argument("files", nargs="*", default=("-"), type=argparse.FileType("r"))
+    parser.add_argument("--save", action="store_true")
     args = parser.parse_args()
 
     # Set global configs for plotting
     plt.style.use("seaborn-v0_8-paper")
     plt.rc("font", family="serif")
 
+    # Setup the out directory
+    if args.save:
+        out_dir = pathlib.Path("plots/")
+        out_dir.mkdir(parents=True, exist_ok=True)
+
     # File reading
-    for file in args.filenames:
+    for file in args.files:
         exps = read_experiments(file)
 
-        plot_transmitted_data(exps[1])
-        plot_time_to_sync(exps)
+        transmitted = plot_transmitted_data(exps[1])
+        if args.save:
+            name = f"{pathlib.Path(file.name).stem}_transmitted.svg"
+            out = out_dir / pathlib.Path(name)
+            transmitted.savefig(out, dpi=600)
+        else:
+            plt.show()
+
+        time = plot_time_to_sync(exps)
+        if args.save:
+            name = f"{pathlib.Path(file.name).stem}_time.svg"
+            out = out_dir / pathlib.Path(name)
+            time.savefig(out, dpi=600)
+        else:
+            plt.show()
 
 
 if __name__ == "__main__":
