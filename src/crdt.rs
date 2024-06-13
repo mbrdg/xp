@@ -425,19 +425,8 @@ impl Measurable for AWSet<String> {
     }
 
     fn false_matches(&self, other: &Self) -> usize {
-        let self_minus_other = self
-            .inserted
-            .iter()
-            .filter_map(|(id, v)| (!self.removed.contains(id)).then_some(v))
-            .filter(|v| !other.contains(v));
-
-        let other_minus_self = other
-            .inserted
-            .iter()
-            .filter_map(|(id, v)| (!other.removed.contains(id)).then_some(v))
-            .filter(|v| !self.contains(v));
-
-        self_minus_other.count() + other_minus_self.count()
+        self.elements().filter(|v| !other.contains(v)).count()
+            + other.elements().filter(|v| !self.contains(v)).count()
     }
 }
 
@@ -483,6 +472,24 @@ mod awset {
         awset.insert(2);
         awset.insert(4);
         assert_eq!(awset.len(), 4);
+    }
+
+    #[test]
+    fn test_elements() {
+        let mut awset = AWSet::new();
+        awset.insert(1);
+        awset.insert(2);
+        awset.insert(3);
+
+        assert!(awset.elements().all(|v| vec![1, 2, 3].contains(v)));
+
+        awset.remove(&1);
+        awset.remove(&3);
+
+        assert_eq!(awset.elements().next(), Some(&2));
+
+        awset.remove(&2);
+        assert_eq!(awset.elements().next(), None);
     }
 
     #[test]
@@ -539,5 +546,33 @@ mod awset {
         let diff = local.difference(&remote);
         assert!(diff.inserted.is_empty());
         assert!(diff.removed.is_empty());
+    }
+
+    #[test]
+    fn test_false_matches() {
+        let local = AWSet {
+            inserted: HashMap::from([
+                (1, "1".to_string()),
+                (4, "4".to_string()),
+                (5, "10".to_string()),
+            ]),
+            removed: HashSet::from([1, 4]),
+        };
+
+        let remote = AWSet {
+            inserted: HashMap::from([
+                (1, "1".to_string()),
+                (2, "3".to_string()),
+                (3, "2".to_string()),
+            ]),
+            removed: HashSet::from([1, 2]),
+        };
+
+        let local_elems = local.elements().collect::<HashSet<_>>();
+        let remote_elems = remote.elements().collect::<HashSet<_>>();
+        assert_eq!(
+            local.false_matches(&remote),
+            local_elems.symmetric_difference(&remote_elems).count()
+        )
     }
 }
