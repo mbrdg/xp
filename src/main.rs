@@ -13,7 +13,7 @@ use crate::{
 
 use crdt::{Decomposable, Extractable};
 use rand::{
-    distributions::{Alphanumeric, DistString, Distribution, Uniform},
+    distributions::{Alphanumeric, DistString},
     rngs::StdRng,
     seq::IteratorRandom,
     SeedableRng,
@@ -33,33 +33,20 @@ fn gsets_with(len: usize, similar: f64, rng: &mut StdRng) -> (GSet<String>, GSet
     let sims = (len as f64 * similar) as usize;
     let diffs = len - sims;
 
-    let mut local = GSet::new();
-    let mut remote = GSet::new();
+    let mut common = GSet::new();
+    (0..sims).for_each(|_| {
+        common.insert(Alphanumeric.sample_string(rng, 80));
+    });
 
-    Uniform::from(50..=80)
-        .sample_iter(rng.clone())
-        .map(|len| Alphanumeric.sample_string(rng, len))
-        .take(sims)
-        .for_each(|item| {
-            local.insert(item.clone());
-            remote.insert(item);
-        });
+    let mut local = common.clone();
+    (0..diffs).for_each(|_| {
+        local.insert(Alphanumeric.sample_string(rng, 80));
+    });
 
-    Uniform::from(50..=80)
-        .sample_iter(rng.clone())
-        .map(|len| Alphanumeric.sample_string(rng, len))
-        .take(diffs)
-        .for_each(|item| {
-            local.insert(item);
-        });
-
-    Uniform::from(50..=80)
-        .sample_iter(rng.clone())
-        .map(|len| Alphanumeric.sample_string(rng, len))
-        .take(diffs)
-        .for_each(|item| {
-            remote.insert(item);
-        });
+    let mut remote = common.clone();
+    (0..diffs).for_each(|_| {
+        remote.insert(Alphanumeric.sample_string(rng, 80));
+    });
 
     assert_eq!(local.len(), len);
     assert_eq!(remote.len(), len);
@@ -83,72 +70,60 @@ fn awsets_with(
     );
 
     let sims = (len as f64 * similar) as usize;
-    let diffs = len - sims;
+    let sims_dels = (sims as f64 * del) as usize;
 
     let mut common = AWSet::new();
-    Uniform::from(50..=80)
-        .sample_iter(rng.clone())
-        .map(|len| Alphanumeric.sample_string(rng, len))
-        .take(sims)
-        .for_each(|item| {
-            common.insert(item);
-        });
-
-    let sims_dels = (sims as f64 * del) as usize;
-    let diff_dels = (diffs as f64 * del) as usize;
+    (0..sims).for_each(|_| {
+        common.insert(Alphanumeric.sample_string(rng, 80));
+    });
 
     common
         .elements()
         .cloned()
         .choose_multiple(rng, sims_dels)
-        .into_iter()
+        .iter()
         .for_each(|item| {
-            common.remove(&item);
+            common.remove(item);
         });
 
-    let mut local_only = AWSet::new();
-    Uniform::from(50..=80)
-        .sample_iter(rng.clone())
-        .map(|len| Alphanumeric.sample_string(rng, len))
-        .take(diffs)
-        .for_each(|item| {
-            local_only.insert(item);
-        });
+    let diffs = len - sims;
+    let diff_dels = (diffs as f64 * del) as usize;
 
-    local_only
+    let mut local = AWSet::new();
+    (0..diffs).for_each(|_| {
+        local.insert(Alphanumeric.sample_string(rng, 80));
+    });
+
+    local
         .elements()
         .cloned()
         .choose_multiple(rng, diff_dels)
-        .into_iter()
+        .iter()
         .for_each(|item| {
-            local_only.remove(&item);
+            local.remove(item);
         });
 
-    let mut remote_only = AWSet::new();
-    Uniform::from(50..=80)
-        .sample_iter(rng.clone())
-        .map(|len| Alphanumeric.sample_string(rng, len))
-        .take(diffs)
-        .for_each(|item| {
-            remote_only.insert(item);
-        });
+    local.join(vec![common.clone()]);
 
-    remote_only
+    let mut remote = AWSet::new();
+    (0..diffs).for_each(|_| {
+        remote.insert(Alphanumeric.sample_string(rng, 80));
+    });
+
+    remote
         .elements()
         .cloned()
         .choose_multiple(rng, diff_dels)
-        .into_iter()
+        .iter()
         .for_each(|item| {
-            remote_only.remove(&item);
+            remote.remove(item);
         });
 
-    let mut local = common.clone();
-    local.join(vec![local_only]);
+    remote.join(vec![common]);
 
-    let mut remote = common.clone();
-    remote.join(vec![remote_only]);
-
-    assert_eq!(local.len(), remote.len());
+    assert_eq!(local.len(), (len as f64 * (1.0 - del)) as usize);
+    assert_eq!(remote.len(), (len as f64 * (1.0 - del)) as usize);
+    assert_eq!(local.false_matches(&remote), 2 * (diffs - diff_dels));
     (local, remote)
 }
 
@@ -187,8 +162,9 @@ fn run_with<T>(similar: f64, local: T, remote: T)
 where
     T: Clone + Decomposable<Decomposition = T> + Default + Extractable + Measurable,
 {
-    let size_of_local = <T as Measurable>::size_of(&local);
-    let size_of_remote = <T as Measurable>::size_of(&remote);
+    let size = <T as Measurable>::size_of(&local);
+    assert_eq!(size, <T as Measurable>::size_of(&remote));
+
     let links = [
         (Bandwidth::Mbps(10.0), Bandwidth::Mbps(1.0)),
         (Bandwidth::Mbps(10.0), Bandwidth::Mbps(10.0)),
@@ -197,7 +173,7 @@ where
 
     for (upload, download) in links {
         println!(
-            "\n{size_of_local} {} {size_of_remote} {}",
+            "\n{size} {} {}",
             upload.bits_per_sec(),
             download.bits_per_sec()
         );
@@ -234,6 +210,7 @@ where
 /// configurations, again, with both symmetric and asymmetric channels.
 fn main() {
     let exec_time = Instant::now();
+
     let seed = rand::random();
     let mut rng = StdRng::seed_from_u64(seed);
     eprintln!("[{:?}] got seed with value of {seed}", exec_time.elapsed());
@@ -248,6 +225,11 @@ fn main() {
     match args[1].to_lowercase().as_str() {
         "gset" => similarities.for_each(|s| {
             let (local, remote) = gsets_with(100_000, s, &mut rng);
+            eprintln!(
+                "[{:?}] gsets with similarity of {s} generated",
+                exec_time.elapsed()
+            );
+
             run_with(s, local, remote);
         }),
 
@@ -258,6 +240,11 @@ fn main() {
         // [1]: https://www.researchgate.net/publication/367503309_Engagement_with_fact-checked_posts_on_Reddit
         "awset" => similarities.for_each(|s| {
             let (local, remote) = awsets_with(20_000, s, 0.2, &mut rng);
+            eprintln!(
+                "[{:?}] awsets with similarity of {s} generated",
+                exec_time.elapsed()
+            );
+
             run_with(s, local, remote);
         }),
         _ => unreachable!(),
