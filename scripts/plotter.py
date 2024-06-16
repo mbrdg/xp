@@ -62,7 +62,9 @@ def read_experiments(f: TextIOWrapper) -> list[Experiment]:
                 m[proto].append(metrics)
 
     assert len(headers) == 3
-    assert all(all(len(v) == 11 for v in c.values()) for c in collector)
+    assert all(
+        all(len(v) == len(list(similarities)) for v in c.values()) for c in collector
+    )
     return [Experiment(*p) for p in zip(headers, collector)]
 
 
