@@ -28,7 +28,7 @@ class Experiment(NamedTuple):
     runs: dict[str, list[Metrics]]
 
 
-similarities = range(0, 101, 10)
+similarities = range(0, 101, 5)
 percent_formatter = ticker.PercentFormatter()
 byte_formatter = ticker.EngFormatter(unit="B")
 bit_formatter = ticker.EngFormatter(unit="b")

@@ -219,7 +219,7 @@ fn main() {
     assert_eq!(args.len(), 2);
 
     let similarities = (0..=100)
-        .step_by(10)
+        .step_by(5)
         .map(|similar| f64::from(similar) / 100.0);
 
     match args[1].to_lowercase().as_str() {
