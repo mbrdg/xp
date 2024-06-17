@@ -213,7 +213,10 @@ fn main() {
 
     let seed = rand::random();
     let mut rng = StdRng::seed_from_u64(seed);
-    eprintln!("[{:?}] got seed with value of {seed}", exec_time.elapsed());
+    eprintln!(
+        "[{:.2?}] got seed with value of {seed}",
+        exec_time.elapsed()
+    );
 
     let args = env::args().collect::<Vec<_>>();
     assert_eq!(args.len(), 2);
@@ -226,7 +229,7 @@ fn main() {
         "gset" => similarities.for_each(|s| {
             let (local, remote) = gsets_with(100_000, s, &mut rng);
             eprintln!(
-                "[{:?}] gsets with similarity of {s} generated",
+                "[{:.2?}] gsets with similarity of {s} generated",
                 exec_time.elapsed()
             );
 
@@ -241,7 +244,7 @@ fn main() {
         "awset" => similarities.for_each(|s| {
             let (local, remote) = awsets_with(20_000, s, 0.2, &mut rng);
             eprintln!(
-                "[{:?}] awsets with similarity of {s} generated",
+                "[{:.2?}] awsets with similarity of {s} generated",
                 exec_time.elapsed()
             );
 
@@ -250,5 +253,5 @@ fn main() {
         _ => unreachable!(),
     };
 
-    eprintln!("[{:?}] exiting...", exec_time.elapsed());
+    eprintln!("[{:.2?}] exiting...", exec_time.elapsed());
 }
