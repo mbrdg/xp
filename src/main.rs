@@ -182,7 +182,7 @@ where
         run(&mut protocol, "Baseline", similar, download, upload);
 
         for load in [0.2, 1.0, 5.0] {
-            let id = format!("Buckets[lf={load}]");
+            let id = format!("Bucketing[lf={load}]");
             let num_buckets = (load * <T as Measurable>::len(&local) as f64) as usize;
             let mut protocol = Buckets::new(local.clone(), remote.clone(), num_buckets);
 
@@ -190,7 +190,7 @@ where
         }
 
         for fpr in [1.0, 25.0] {
-            let id = format!("BloomBuckets[lf=1,fpr={fpr}%]");
+            let id = format!("Bloom+Bucketing[lf=1,fpr={fpr}%]");
             let num_buckets = <T as Measurable>::len(&local);
             let mut protocol =
                 BloomBuckets::new(local.clone(), remote.clone(), fpr / 100.0, num_buckets);
