@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-pub trait Tracker {
+pub trait Telemetry {
     type Event;
 
     fn is_ready(&self) -> bool;
@@ -137,7 +137,7 @@ impl DefaultTracker {
     }
 }
 
-impl Tracker for DefaultTracker {
+impl Telemetry for DefaultTracker {
     type Event = DefaultEvent;
 
     fn is_ready(&self) -> bool {

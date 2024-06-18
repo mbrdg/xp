@@ -1,9 +1,9 @@
 use crate::{
-    crdt::{Decomposable, Extractable, Measurable},
-    tracker::{DefaultEvent, DefaultTracker, Tracker},
+    crdt::{Decompose, Extract, Measure},
+    tracker::{DefaultEvent, DefaultTracker, Telemetry},
 };
 
-use super::{BloomBased, Protocol};
+use super::{Algorithm, BuildFilter};
 
 pub struct Bloom<T> {
     local: T,
@@ -19,11 +19,11 @@ impl<T> Bloom<T> {
     }
 }
 
-impl<T> BloomBased<T> for Bloom<T> where T: Extractable {}
+impl<T> BuildFilter<T> for Bloom<T> where T: Extract {}
 
-impl<T> Protocol for Bloom<T>
+impl<T> Algorithm for Bloom<T>
 where
-    T: Decomposable<Decomposition = T> + Extractable + Measurable,
+    T: Decompose<Decomposition = T> + Extract + Measure,
 {
     type Tracker = DefaultTracker;
 
@@ -39,7 +39,7 @@ where
 
         tracker.register(DefaultEvent::LocalToRemote {
             state: 0,
-            metadata: <Self as BloomBased<T>>::size_of(&local_filter),
+            metadata: <Self as BuildFilter<T>>::size_of(&local_filter),
             upload: tracker.upload(),
         });
 
@@ -52,8 +52,8 @@ where
         let remote_filter = self.filter_from(&common, self.fpr);
 
         tracker.register(DefaultEvent::RemoteToLocal {
-            state: local_unknown.iter().map(<T as Measurable>::size_of).sum(),
-            metadata: <Self as BloomBased<T>>::size_of(&remote_filter),
+            state: local_unknown.iter().map(<T as Measure>::size_of).sum(),
+            metadata: <Self as BuildFilter<T>>::size_of(&remote_filter),
             download: tracker.download(),
         });
 
@@ -62,7 +62,7 @@ where
         let remote_unknown = self.partition(&remote_filter, local_split).1;
 
         tracker.register(DefaultEvent::LocalToRemote {
-            state: remote_unknown.iter().map(<T as Measurable>::size_of).sum(),
+            state: remote_unknown.iter().map(<T as Measure>::size_of).sum(),
             metadata: 0,
             upload: tracker.upload(),
         });
@@ -73,6 +73,6 @@ where
 
         // 6. Sanity check.
         // NOTE: This algorithm does not guarantee full sync.
-        tracker.finish(<T as Measurable>::false_matches(&self.local, &self.remote));
+        tracker.finish(<T as Measure>::false_matches(&self.local, &self.remote));
     }
 }

@@ -1,9 +1,9 @@
 use crate::{
-    crdt::{Decomposable, Measurable},
-    tracker::{DefaultEvent, DefaultTracker, Tracker},
+    crdt::{Decompose, Measure},
+    tracker::{DefaultEvent, DefaultTracker, Telemetry},
 };
 
-use super::Protocol;
+use super::Algorithm;
 
 pub struct Baseline<T> {
     local: T,
@@ -18,9 +18,9 @@ impl<T> Baseline<T> {
     }
 }
 
-impl<T> Protocol for Baseline<T>
+impl<T> Algorithm for Baseline<T>
 where
-    T: Clone + Decomposable<Decomposition = T> + Measurable,
+    T: Clone + Decompose<Decomposition = T> + Measure,
 {
     type Tracker = DefaultTracker;
 
@@ -34,7 +34,7 @@ where
         let local_state = self.local.clone();
 
         tracker.register(DefaultEvent::LocalToRemote {
-            state: <T as Measurable>::size_of(&local_state),
+            state: <T as Measure>::size_of(&local_state),
             metadata: 0,
             upload: tracker.upload(),
         });
@@ -44,7 +44,7 @@ where
         let local_unseen = self.remote.difference(&local_state);
 
         tracker.register(DefaultEvent::RemoteToLocal {
-            state: <T as Measurable>::size_of(&local_unseen),
+            state: <T as Measure>::size_of(&local_unseen),
             metadata: 0,
             download: tracker.download(),
         });
@@ -54,7 +54,7 @@ where
         self.local.join(vec![local_unseen]);
 
         // 4. Sanity check.
-        tracker.finish(<T as Measurable>::false_matches(&self.local, &self.remote));
+        tracker.finish(<T as Measure>::false_matches(&self.local, &self.remote));
     }
 }
 

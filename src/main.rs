@@ -6,12 +6,12 @@ use std::{
 };
 
 use crate::{
-    crdt::{AWSet, GSet, Measurable},
-    sync::{baseline::Baseline, bloombuckets::BloomBuckets, buckets::Buckets, Protocol},
-    tracker::{Bandwidth, DefaultEvent, DefaultTracker, Tracker},
+    crdt::{AWSet, GSet, Measure},
+    sync::{baseline::Baseline, bloombuckets::BloomBuckets, buckets::Buckets, Algorithm},
+    tracker::{Bandwidth, DefaultEvent, DefaultTracker, Telemetry},
 };
 
-use crdt::{Decomposable, Extractable};
+use crdt::{Decompose, Extract};
 use rand::{
     distributions::{Alphanumeric, DistString},
     rngs::StdRng,
@@ -130,7 +130,7 @@ fn awsets_with(
 /// Runs the specified protocol and outputs the metrics obtained.
 fn run<P>(proto: &mut P, id: &str, similar: f64, download: Bandwidth, upload: Bandwidth)
 where
-    P: Protocol<Tracker = DefaultTracker>,
+    P: Algorithm<Tracker = DefaultTracker>,
 {
     assert!(
         (0.0..=1.0).contains(&similar),
@@ -160,10 +160,10 @@ where
 
 fn run_with<T>(similar: f64, local: T, remote: T)
 where
-    T: Clone + Decomposable<Decomposition = T> + Default + Extractable + Measurable,
+    T: Clone + Decompose<Decomposition = T> + Default + Extract + Measure,
 {
-    let size = <T as Measurable>::size_of(&local);
-    assert_eq!(size, <T as Measurable>::size_of(&remote));
+    let size = <T as Measure>::size_of(&local);
+    assert_eq!(size, <T as Measure>::size_of(&remote));
 
     let links = [
         (Bandwidth::Mbps(10.0), Bandwidth::Mbps(1.0)),
@@ -183,7 +183,7 @@ where
 
         for load in [0.2, 1.0, 5.0] {
             let id = format!("Bucketing[lf={load}]");
-            let num_buckets = (load * <T as Measurable>::len(&local) as f64) as usize;
+            let num_buckets = (load * <T as Measure>::len(&local) as f64) as usize;
             let mut protocol = Buckets::new(local.clone(), remote.clone(), num_buckets);
 
             run(&mut protocol, &id, similar, download, upload);
@@ -191,7 +191,7 @@ where
 
         for fpr in [1.0, 25.0] {
             let id = format!("Bloom+Bucketing[lf=1,fpr={fpr}%]");
-            let num_buckets = <T as Measurable>::len(&local);
+            let num_buckets = <T as Measure>::len(&local);
             let mut protocol =
                 BloomBuckets::new(local.clone(), remote.clone(), fpr / 100.0, num_buckets);
 

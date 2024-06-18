@@ -7,7 +7,7 @@ use std::{
 use either::*;
 use rand::Rng;
 
-pub trait Decomposable {
+pub trait Decompose {
     type Decomposition;
 
     fn split(&self) -> Vec<Self::Decomposition>;
@@ -15,16 +15,16 @@ pub trait Decomposable {
     fn difference(&self, remote: &Self::Decomposition) -> Self::Decomposition;
 }
 
-pub trait Extractable {
+pub trait Extract {
     type Item: Hash;
 
-    fn get(&self) -> Self::Item;
+    fn extract(&self) -> Self::Item;
 }
 
-pub trait Measurable {
+pub trait Measure {
     fn len(replica: &Self) -> usize
     where
-        Self: Decomposable;
+        Self: Decompose;
 
     fn size_of(replica: &Self) -> usize;
     fn false_matches(&self, other: &Self) -> usize;
@@ -109,7 +109,7 @@ where
     }
 }
 
-impl<T> Decomposable for GSet<T>
+impl<T> Decompose for GSet<T>
 where
     T: Clone + Eq + Hash,
 {
@@ -138,13 +138,13 @@ where
     }
 }
 
-impl<T> Extractable for GSet<T>
+impl<T> Extract for GSet<T>
 where
     T: Clone + Eq + Hash,
 {
     type Item = T;
 
-    fn get(&self) -> Self::Item {
+    fn extract(&self) -> Self::Item {
         assert_eq!(
             self.len(),
             1,
@@ -155,7 +155,7 @@ where
     }
 }
 
-impl Measurable for GSet<String> {
+impl Measure for GSet<String> {
     fn len(replica: &Self) -> usize {
         replica.len()
     }
@@ -340,7 +340,7 @@ where
     }
 }
 
-impl<T> Decomposable for AWSet<T>
+impl<T> Decompose for AWSet<T>
 where
     T: Clone + Eq + Hash,
 {
@@ -380,13 +380,13 @@ where
     }
 }
 
-impl<T> Extractable for AWSet<T>
+impl<T> Extract for AWSet<T>
 where
     T: Clone + Eq + Hash,
 {
     type Item = Either<(u64, T), u64>;
 
-    fn get(&self) -> Self::Item {
+    fn extract(&self) -> Self::Item {
         if self.removed.is_empty() {
             assert_eq!(
                 self.inserted.len(),
@@ -413,7 +413,7 @@ where
     }
 }
 
-impl Measurable for AWSet<String> {
+impl Measure for AWSet<String> {
     fn len(replica: &Self) -> usize {
         replica.inserted.len() + replica.removed.len()
     }

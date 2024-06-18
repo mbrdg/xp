@@ -1,11 +1,11 @@
 use std::{collections::HashMap, hash::RandomState, iter::zip, mem};
 
 use crate::{
-    crdt::{Decomposable, Extractable, Measurable},
-    tracker::{DefaultEvent, DefaultTracker, Tracker},
+    crdt::{Decompose, Extract, Measure},
+    tracker::{DefaultEvent, DefaultTracker, Telemetry},
 };
 
-use super::{BloomBased, Dispatcher, Protocol};
+use super::{Algorithm, BuildFilter, Dispatcher};
 
 pub struct BloomBuckets<T> {
     local: T,
@@ -27,15 +27,12 @@ impl<T> BloomBuckets<T> {
     }
 }
 
-impl<T> BloomBased<T> for BloomBuckets<T> where T: Extractable {}
-impl<T> Dispatcher<T> for BloomBuckets<T> where
-    T: Clone + Decomposable<Decomposition = T> + Extractable
-{
-}
+impl<T> BuildFilter<T> for BloomBuckets<T> where T: Extract {}
+impl<T> Dispatcher<T> for BloomBuckets<T> where T: Clone + Decompose<Decomposition = T> + Extract {}
 
-impl<T> Protocol for BloomBuckets<T>
+impl<T> Algorithm for BloomBuckets<T>
 where
-    T: Clone + Decomposable<Decomposition = T> + Default + Extractable + Measurable,
+    T: Clone + Decompose<Decomposition = T> + Default + Extract + Measure,
 {
     type Tracker = DefaultTracker;
 
@@ -53,7 +50,7 @@ where
 
         tracker.register(DefaultEvent::LocalToRemote {
             state: 0,
-            metadata: <Self as BloomBased<T>>::size_of(&local_filter),
+            metadata: <Self as BuildFilter<T>>::size_of(&local_filter),
             upload: tracker.upload(),
         });
 
@@ -74,8 +71,8 @@ where
         let remote_hashes = BloomBuckets::<T>::hashes(&remote_buckets, &hasher);
 
         tracker.register(DefaultEvent::RemoteToLocal {
-            state: local_unknown.iter().map(<T as Measurable>::size_of).sum(),
-            metadata: <Self as BloomBased<T>>::size_of(&remote_filter)
+            state: local_unknown.iter().map(<T as Measure>::size_of).sum(),
+            metadata: <Self as BuildFilter<T>>::size_of(&remote_filter)
                 + mem::size_of_val(remote_hashes.as_slice()),
             download: tracker.download(),
         });
@@ -114,7 +111,7 @@ where
             state: remote_unknown
                 .iter()
                 .chain(non_matching.values())
-                .map(<T as Measurable>::size_of)
+                .map(<T as Measure>::size_of)
                 .sum(),
             metadata: non_matching.keys().count() * mem::size_of::<usize>(),
             upload: tracker.upload(),
@@ -151,7 +148,7 @@ where
         tracker.register(DefaultEvent::RemoteToLocal {
             state: local_false_positives
                 .iter()
-                .map(<T as Measurable>::size_of)
+                .map(<T as Measure>::size_of)
                 .sum(),
             metadata: 0,
             download: tracker.download(),
@@ -165,7 +162,7 @@ where
         self.local.join(local_false_positives);
 
         // 6. Sanity Check.
-        tracker.finish(<T as Measurable>::false_matches(&self.local, &self.remote));
+        tracker.finish(<T as Measure>::false_matches(&self.local, &self.remote));
     }
 }
 

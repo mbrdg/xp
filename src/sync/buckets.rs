@@ -1,11 +1,11 @@
 use std::{collections::HashMap, hash::RandomState, iter::zip, mem};
 
 use crate::{
-    crdt::{Decomposable, Extractable, Measurable},
-    tracker::{DefaultEvent, DefaultTracker, Tracker},
+    crdt::{Decompose, Extract, Measure},
+    tracker::{DefaultEvent, DefaultTracker, Telemetry},
 };
 
-use super::{Dispatcher, Protocol};
+use super::{Algorithm, Dispatcher};
 
 pub struct Buckets<T> {
     local: T,
@@ -25,11 +25,11 @@ impl<T> Buckets<T> {
     }
 }
 
-impl<T> Dispatcher<T> for Buckets<T> where T: Clone + Decomposable<Decomposition = T> + Extractable {}
+impl<T> Dispatcher<T> for Buckets<T> where T: Clone + Decompose<Decomposition = T> + Extract {}
 
-impl<T> Protocol for Buckets<T>
+impl<T> Algorithm for Buckets<T>
 where
-    T: Clone + Decomposable<Decomposition = T> + Default + Extractable + Measurable,
+    T: Clone + Decompose<Decomposition = T> + Default + Extract + Measure,
 {
     type Tracker = DefaultTracker;
 
@@ -74,7 +74,7 @@ where
             .collect::<HashMap<_, _>>();
 
         tracker.register(DefaultEvent::RemoteToLocal {
-            state: non_matching.values().map(<T as Measurable>::size_of).sum(),
+            state: non_matching.values().map(<T as Measure>::size_of).sum(),
             metadata: non_matching.keys().count() * mem::size_of::<usize>(),
             download: tracker.download(),
         });
@@ -104,7 +104,7 @@ where
             .collect::<Vec<_>>();
 
         tracker.register(DefaultEvent::LocalToRemote {
-            state: remote_unknown.iter().map(<T as Measurable>::size_of).sum(),
+            state: remote_unknown.iter().map(<T as Measure>::size_of).sum(),
             metadata: 0,
             upload: tracker.upload(),
         });
@@ -114,7 +114,7 @@ where
         self.remote.join(remote_unknown);
 
         // 6. Sanity check.
-        tracker.finish(<T as Measurable>::false_matches(&self.local, &self.remote));
+        tracker.finish(<T as Measure>::false_matches(&self.local, &self.remote));
     }
 }
 

@@ -6,8 +6,8 @@ use std::{
 
 use crate::{
     bloom::BloomFilter,
-    crdt::{Decomposable, Extractable},
-    tracker::Tracker,
+    crdt::{Decompose, Extract},
+    tracker::Telemetry,
 };
 
 pub mod baseline;
@@ -15,15 +15,15 @@ pub mod bloom;
 pub mod bloombuckets;
 pub mod buckets;
 
-pub trait Protocol {
-    type Tracker: Tracker;
+pub trait Algorithm {
+    type Tracker: Telemetry;
 
     fn sync(&mut self, tracker: &mut Self::Tracker);
 }
 
 pub trait Dispatcher<T>
 where
-    T: Clone + Decomposable<Decomposition = T> + Extractable,
+    T: Clone + Decompose<Decomposition = T> + Extract,
 {
     fn dispatch<H: BuildHasher>(
         &self,
@@ -34,7 +34,7 @@ where
         let mut buckets = vec![BTreeMap::new(); len];
 
         replica.split().into_iter().for_each(|d| {
-            let hash = hasher.hash_one(d.get());
+            let hash = hasher.hash_one(d.extract());
             let idx = usize::try_from(hash).unwrap() % len;
 
             buckets[idx].insert(hash, d);
@@ -51,28 +51,30 @@ where
     }
 }
 
-pub trait BloomBased<T>
+pub trait BuildFilter<T>
 where
-    T: Extractable,
+    T: Extract,
 {
-    fn filter_from(&self, decompositions: &[T], fpr: f64) -> BloomFilter<<T as Extractable>::Item> {
+    fn filter_from(&self, decompositions: &[T], fpr: f64) -> BloomFilter<<T as Extract>::Item> {
         let mut filter = BloomFilter::new(decompositions.len(), fpr);
-        decompositions.iter().for_each(|d| filter.insert(&d.get()));
+        decompositions
+            .iter()
+            .for_each(|d| filter.insert(&d.extract()));
 
         filter
     }
 
     fn partition(
         &self,
-        filter: &BloomFilter<<T as Extractable>::Item>,
+        filter: &BloomFilter<<T as Extract>::Item>,
         decompositions: Vec<T>,
     ) -> (Vec<T>, Vec<T>) {
         decompositions
             .into_iter()
-            .partition(|d| filter.contains(&d.get()))
+            .partition(|d| filter.contains(&d.extract()))
     }
 
-    fn size_of(filter: &BloomFilter<<T as Extractable>::Item>) -> usize {
+    fn size_of(filter: &BloomFilter<<T as Extract>::Item>) -> usize {
         filter.bitslice().chunks(8).count()
             + mem::size_of::<RandomState>() * 2
             + mem::size_of::<u64>()
