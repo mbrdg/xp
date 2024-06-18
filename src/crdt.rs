@@ -543,6 +543,8 @@ mod awset {
             removed: HashSet::from([1, 3]),
         };
 
+        assert_eq!(local, remote);
+
         let diff = local.difference(&remote);
         assert!(diff.inserted.is_empty());
         assert!(diff.removed.is_empty());
