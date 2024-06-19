@@ -302,25 +302,19 @@ where
     }
 
     pub fn remove(&mut self, value: &T) -> Self {
-        let id = self
+        let ids = self
             .inserted
             .iter()
-            .find(|(id, v)| value == *v && !self.removed.contains(id))
-            .map(|(id, _)| {
-                self.removed.insert(*id);
-                *id
-            });
+            .filter_map(|(id, v)| (value == v && !self.removed.contains(id)).then_some(*id))
+            .collect::<HashSet<_>>();
 
-        if let Some(id) = id {
-            Self {
-                inserted: HashMap::new(),
-                removed: HashSet::from([id]),
-            }
-        } else {
-            Self {
-                inserted: HashMap::new(),
-                removed: HashSet::new(),
-            }
+        ids.iter().for_each(|id| {
+            self.removed.insert(*id);
+        });
+
+        Self {
+            inserted: HashMap::new(),
+            removed: ids,
         }
     }
 }
@@ -484,6 +478,7 @@ mod awset {
         assert!(awset.elements().all(|v| vec![1, 2, 3].contains(v)));
 
         awset.remove(&1);
+        awset.insert(3);
         awset.remove(&3);
 
         assert_eq!(awset.elements().next(), Some(&2));
