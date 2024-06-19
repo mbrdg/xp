@@ -324,12 +324,19 @@ where
     T: Clone + Eq + Hash,
 {
     pub fn insert(&mut self, value: T) -> Self {
-        let id = self.uid();
-        self.inserted.insert(id, value.clone());
+        if !self.contains(&value) {
+            let id = self.uid();
+            self.inserted.insert(id, value.clone());
 
-        Self {
-            inserted: HashMap::from([(id, value)]),
-            removed: HashSet::new(),
+            Self {
+                inserted: HashMap::from([(id, value)]),
+                removed: HashSet::new(),
+            }
+        } else {
+            Self {
+                inserted: HashMap::new(),
+                removed: HashSet::new(),
+            }
         }
     }
 }
@@ -474,7 +481,9 @@ mod awset {
         awset.insert(1);
         awset.insert(2);
         awset.insert(3);
+        awset.insert(3);
 
+        assert_eq!(awset.elements().count(), 3);
         assert!(awset.elements().all(|v| vec![1, 2, 3].contains(v)));
 
         awset.remove(&1);
