@@ -34,6 +34,16 @@ impl<T> BloomBuckets<T> {
     }
 }
 
+impl<T> Default for BloomBuckets<T> {
+    fn default() -> Self {
+        Self {
+            fpr: 0.01,
+            lf: 1.0,
+            _marker: PhantomData,
+        }
+    }
+}
+
 impl<T> Display for BloomBuckets<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(

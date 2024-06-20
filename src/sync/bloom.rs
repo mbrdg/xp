@@ -29,6 +29,15 @@ impl<T> Bloom<T> {
     }
 }
 
+impl<T> Default for Bloom<T> {
+    fn default() -> Self {
+        Self {
+            fpr: 0.01,
+            _marker: PhantomData,
+        }
+    }
+}
+
 impl<T> Display for Bloom<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "Bloom[fpr={}%]", self.fpr * 100.0)

@@ -28,6 +28,15 @@ impl<T> Buckets<T> {
     }
 }
 
+impl<T> Default for Buckets<T> {
+    fn default() -> Self {
+        Self {
+            lf: 1.0,
+            _marker: PhantomData,
+        }
+    }
+}
+
 impl<T> Display for Buckets<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "Bucketing[lf={}]", self.lf)
