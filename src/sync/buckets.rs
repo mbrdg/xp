@@ -163,6 +163,6 @@ mod tests {
 
         let bytes: Vec<_> = tracker.events().iter().map(DefaultEvent::bytes).collect();
         assert_eq!(bytes[0], 11 * mem::size_of::<u64>());
-        assert_eq!(tracker.diffs(), 0);
+        assert_eq!(tracker.false_matches(), 0);
     }
 }

@@ -57,9 +57,9 @@ def read_experiments(f: TextIOWrapper) -> list[Experiment]:
             assert headers[i] == header
 
             while parts := f.readline().rstrip().split():
-                proto, *metrics = parts
+                algo, *metrics = parts
                 metrics = Metrics(int(metrics[0]), int(metrics[1]), float(metrics[2]))
-                m[proto].append(metrics)
+                m[algo].append(metrics)
 
     assert len(headers) == 3
     assert all(
@@ -82,8 +82,8 @@ def plot_transmitted(exp: Experiment, *, what: str) -> Figure:
     ax.grid(linestyle="--", linewidth=0.5, alpha=0.75)
     ax.set(xlabel="Similarity", xmargin=0.02, ylabel=f"{what.title()} (Bytes)")
 
-    for proto, metrics in exp.runs.items():
-        label = fmt_label(proto)
+    for algo, metrics in exp.runs.items():
+        label = fmt_label(algo)
 
         if what == "total":
             transmitted = [m.state + m.metadata for m in metrics]
@@ -117,8 +117,8 @@ def plot_time_to_sync(exp: Experiment) -> Figure:
     ax.grid(linestyle="--", linewidth=0.5, alpha=0.75)
     ax.set(xlabel="Similarity", xmargin=0.02, ylabel=ylabel)
 
-    for proto, metrics in exp.runs.items():
-        label = fmt_label(proto)
+    for algo, metrics in exp.runs.items():
+        label = fmt_label(algo)
         time = [m.duration for m in metrics]
         ax.plot(similarities, time, "o-", label=label)
 

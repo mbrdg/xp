@@ -128,9 +128,9 @@ fn awsets_with(
 }
 
 /// Runs the specified protocol and outputs the metrics obtained.
-fn run<P>(proto: &mut P, id: &str, similar: f64, download: Bandwidth, upload: Bandwidth)
+fn run<A>(algo: &mut A, id: &str, similar: f64, download: Bandwidth, upload: Bandwidth)
 where
-    P: Algorithm<Tracker = DefaultTracker>,
+    A: Algorithm<Tracker = DefaultTracker>,
 {
     assert!(
         (0.0..=1.0).contains(&similar),
@@ -138,11 +138,11 @@ where
     );
 
     let mut tracker = DefaultTracker::new(download, upload);
-    proto.sync(&mut tracker);
+    algo.sync(&mut tracker);
 
-    let diffs = tracker.diffs();
+    let diffs = tracker.false_matches();
     if diffs > 0 {
-        eprintln!("{id} not totally synced with {diffs} diffs");
+        eprintln!("{id} not totally synced with {diffs} false matches");
     }
 
     let events = tracker.events();

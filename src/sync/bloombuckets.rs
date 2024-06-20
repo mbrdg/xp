@@ -206,7 +206,7 @@ mod tests {
         let mut tracker = DefaultTracker::new(download, upload);
 
         baseline.sync(&mut tracker);
-        assert_eq!(tracker.diffs(), 0);
+        assert_eq!(tracker.false_matches(), 0);
 
         let events = tracker.events();
         assert_eq!(events.len(), 4);

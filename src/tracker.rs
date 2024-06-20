@@ -6,8 +6,8 @@ pub trait Telemetry {
     fn is_ready(&self) -> bool;
     fn register(&mut self, event: Self::Event);
     fn events(&self) -> &Vec<Self::Event>;
-    fn finish(&mut self, diffs: usize);
-    fn diffs(&self) -> usize;
+    fn finish(&mut self, false_matches: usize);
+    fn false_matches(&self) -> usize;
 }
 
 /// Network Bandwidth value in bits per second.
@@ -160,7 +160,7 @@ impl Telemetry for DefaultTracker {
         }
     }
 
-    fn diffs(&self) -> usize {
+    fn false_matches(&self) -> usize {
         self.diffs
             .expect("`finish()` should be called before `diffs()`")
     }
