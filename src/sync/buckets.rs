@@ -1,4 +1,4 @@
-use std::{collections::HashMap, hash::RandomState, iter::zip, mem};
+use std::{collections::HashMap, hash::RandomState, iter::zip, marker::PhantomData, mem};
 
 use crate::{
     crdt::{Decompose, Extract, Measure},
@@ -7,44 +7,46 @@ use crate::{
 
 use super::{Algorithm, Dispatcher};
 
+#[derive(Clone, Copy, Debug)]
 pub struct Buckets<T> {
-    local: T,
-    remote: T,
-    buckets: usize,
+    lf: f64,
+    _marker: PhantomData<T>,
 }
 
 impl<T> Buckets<T> {
     #[inline]
     #[must_use]
-    pub fn new(local: T, remote: T, buckets: usize) -> Self {
+    pub fn new(lf: f64) -> Self {
+        assert!(lf > 0.0, "load factor should be greater than 0.0");
+
         Self {
-            local,
-            remote,
-            buckets,
+            lf,
+            _marker: PhantomData,
         }
     }
 }
 
 impl<T> Dispatcher<T> for Buckets<T> where T: Clone + Decompose<Decomposition = T> + Extract {}
 
-impl<T> Algorithm for Buckets<T>
+impl<T> Algorithm<T> for Buckets<T>
 where
     T: Clone + Decompose<Decomposition = T> + Default + Extract + Measure,
 {
     type Tracker = DefaultTracker;
 
-    fn sync(&mut self, tracker: &mut Self::Tracker) {
+    fn sync(&self, local: &mut T, remote: &mut T, tracker: &mut Self::Tracker) {
         assert!(
             tracker.is_ready(),
             "tracker should be ready, i.e., no captured events and not finished"
         );
 
         let hasher = RandomState::new();
+        let buckets = (self.lf * <T as Measure>::len(local) as f64) as usize;
 
         // 1. Assign each join-decomposition to a bucket based on the modulo of its hash and send
         //    the hashes to the remote replica.
         // NOTE: This policy must be deterministic across both peers.
-        let local_buckets = self.dispatch(&self.local, self.buckets, &hasher);
+        let local_buckets = self.dispatch(local, buckets, &hasher);
         let local_hashes = Buckets::<T>::hashes(&local_buckets, &hasher);
 
         tracker.register(DefaultEvent::LocalToRemote {
@@ -54,7 +56,7 @@ where
         });
 
         // 2. Repeat the procedure from 1., but now on the remote replica.
-        let remote_buckets = self.dispatch(&self.remote, self.buckets, &hasher);
+        let remote_buckets = self.dispatch(remote, buckets, &hasher);
         let remote_hashes = Buckets::<T>::hashes(&remote_buckets, &hasher);
 
         // 3. Compute the buckets whose hash does not match on the remote replica and send those
@@ -110,11 +112,11 @@ where
         });
 
         // 5. Join the appropriate join-decompositions to each replica.
-        self.local.join(local_unknown.collect());
-        self.remote.join(remote_unknown);
+        local.join(local_unknown.collect());
+        remote.join(remote_unknown);
 
         // 6. Sanity check.
-        tracker.finish(<T as Measure>::false_matches(&self.local, &self.remote));
+        tracker.finish(<T as Measure>::false_matches(local, remote));
     }
 }
 
@@ -127,7 +129,7 @@ mod tests {
 
     #[test]
     fn test_sync() {
-        let local = {
+        let mut local = {
             let mut gset = GSet::new();
             let items = "Stuck In A Moment You Can't Get Out Of"
                 .split_whitespace()
@@ -140,7 +142,7 @@ mod tests {
             gset
         };
 
-        let remote = {
+        let mut remote = {
             let mut gset = GSet::new();
             let items = "I Still Haven't Found What I'm Looking For"
                 .split_whitespace()
@@ -153,13 +155,11 @@ mod tests {
             gset
         };
 
-        let buckets = (1.25 * local.len() as f64) as usize;
-        let mut baseline = Buckets::new(local, remote, buckets);
-
         let (download, upload) = (Bandwidth::Kbps(0.5), Bandwidth::Kbps(0.5));
         let mut tracker = DefaultTracker::new(download, upload);
+        let buckets = Buckets::new(1.25);
 
-        baseline.sync(&mut tracker);
+        buckets.sync(&mut local, &mut remote, &mut tracker);
 
         let bytes: Vec<_> = tracker.events().iter().map(DefaultEvent::bytes).collect();
         assert_eq!(bytes[0], 11 * mem::size_of::<u64>());

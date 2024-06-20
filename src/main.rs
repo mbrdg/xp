@@ -127,18 +127,24 @@ fn awsets_with(
     (local, remote)
 }
 
+type Replica<T> = (T, Bandwidth);
+
 /// Runs the specified protocol and outputs the metrics obtained.
-fn run<A>(algo: &mut A, id: &str, similar: f64, download: Bandwidth, upload: Bandwidth)
+fn run<T, A>(algo: &A, id: &str, similar: f64, local: Replica<T>, remote: Replica<T>)
 where
-    A: Algorithm<Tracker = DefaultTracker>,
+    T: Clone + Decompose<Decomposition = T> + Default + Extract + Measure,
+    A: Algorithm<T, Tracker = DefaultTracker>,
 {
     assert!(
         (0.0..=1.0).contains(&similar),
         "similarity should be a ratio between 0.0 and 1.0"
     );
 
+    let (mut local, upload) = local;
+    let (mut remote, download) = remote;
+
     let mut tracker = DefaultTracker::new(download, upload);
-    algo.sync(&mut tracker);
+    algo.sync(&mut local, &mut remote, &mut tracker);
 
     let diffs = tracker.false_matches();
     if diffs > 0 {
@@ -178,24 +184,41 @@ where
             download.bits_per_sec()
         );
 
-        let mut protocol = Baseline::new(local.clone(), remote.clone());
-        run(&mut protocol, "Baseline", similar, download, upload);
+        let id = "Baseline";
+        let algo = Baseline::new();
+
+        run(
+            &algo,
+            id,
+            similar,
+            (local.clone(), upload),
+            (remote.clone(), download),
+        );
 
         for load in [0.2, 1.0, 5.0] {
             let id = format!("Bucketing[lf={load}]");
-            let num_buckets = (load * <T as Measure>::len(&local) as f64) as usize;
-            let mut protocol = Buckets::new(local.clone(), remote.clone(), num_buckets);
+            let protocol = Buckets::new(load);
 
-            run(&mut protocol, &id, similar, download, upload);
+            run(
+                &protocol,
+                &id,
+                similar,
+                (local.clone(), upload),
+                (remote.clone(), download),
+            );
         }
 
-        for fpr in [1.0, 25.0] {
-            let id = format!("Bloom+Bucketing[lf=1,fpr={fpr}%]");
-            let num_buckets = <T as Measure>::len(&local);
-            let mut protocol =
-                BloomBuckets::new(local.clone(), remote.clone(), fpr / 100.0, num_buckets);
+        for fpr in [0.01, 0.25] {
+            let id = format!("Bloom+Bucketing[lf=1,fpr={}%]", fpr * 100.0);
+            let protocol = BloomBuckets::new(fpr, 1.0);
 
-            run(&mut protocol, &id, similar, download, upload);
+            run(
+                &protocol,
+                &id,
+                similar,
+                (local.clone(), upload),
+                (remote.clone(), download),
+            );
         }
     }
 }

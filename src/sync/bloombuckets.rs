@@ -1,4 +1,4 @@
-use std::{collections::HashMap, hash::RandomState, iter::zip, mem};
+use std::{collections::HashMap, hash::RandomState, iter::zip, marker::PhantomData, mem};
 
 use crate::{
     crdt::{Decompose, Extract, Measure},
@@ -7,22 +7,27 @@ use crate::{
 
 use super::{Algorithm, BuildFilter, Dispatcher};
 
+#[derive(Clone, Copy, Debug)]
 pub struct BloomBuckets<T> {
-    local: T,
-    remote: T,
     fpr: f64,
-    buckets: usize,
+    lf: f64,
+    _marker: PhantomData<T>,
 }
 
 impl<T> BloomBuckets<T> {
     #[inline]
     #[must_use]
-    pub fn new(local: T, remote: T, fpr: f64, buckets: usize) -> Self {
+    pub fn new(fpr: f64, lf: f64) -> Self {
+        assert!(
+            fpr > 0.0 && (0.0..1.0).contains(&fpr),
+            "fpr should be a ratio in the interval (0.0, 1.0)"
+        );
+        assert!(lf > 0.0, "load factor should be greater than 0.0");
+
         Self {
-            local,
-            remote,
             fpr,
-            buckets,
+            lf,
+            _marker: PhantomData,
         }
     }
 }
@@ -30,22 +35,23 @@ impl<T> BloomBuckets<T> {
 impl<T> BuildFilter<T> for BloomBuckets<T> where T: Extract {}
 impl<T> Dispatcher<T> for BloomBuckets<T> where T: Clone + Decompose<Decomposition = T> + Extract {}
 
-impl<T> Algorithm for BloomBuckets<T>
+impl<T> Algorithm<T> for BloomBuckets<T>
 where
     T: Clone + Decompose<Decomposition = T> + Default + Extract + Measure,
 {
     type Tracker = DefaultTracker;
 
-    fn sync(&mut self, tracker: &mut Self::Tracker) {
+    fn sync(&self, local: &mut T, remote: &mut T, tracker: &mut Self::Tracker) {
         assert!(
             tracker.is_ready(),
             "tracker should be ready, i.e., no captured events and not finished"
         );
 
         let hasher = RandomState::new();
+        let buckets = (self.lf * <T as Measure>::len(local) as f64) as usize;
 
         // 1. Create a filter from the local join-deocompositions and send it to the remote replica.
-        let local_decompositions = self.local.split();
+        let local_decompositions = local.split();
         let local_filter = self.filter_from(&local_decompositions, self.fpr);
 
         tracker.register(DefaultEvent::LocalToRemote {
@@ -56,7 +62,7 @@ where
 
         // 2. Partion the remote join-decompositions into *probably* present in both replicas or
         //    *definitely not* present in the local replica.
-        let (remote_common, local_unknown) = self.partition(&local_filter, self.remote.split());
+        let (remote_common, local_unknown) = self.partition(&local_filter, remote.split());
 
         // 3. Build a filter from the partion of *probably* common join-decompositions and send it
         //    to the local replica. At this stage the remote replica also constructs its buckets.
@@ -66,7 +72,7 @@ where
             let mut state = T::default();
             state.join(remote_common);
 
-            self.dispatch(&state, self.buckets, &hasher)
+            self.dispatch(&state, buckets, &hasher)
         };
         let remote_hashes = BloomBuckets::<T>::hashes(&remote_buckets, &hasher);
 
@@ -89,7 +95,7 @@ where
             let mut state = T::default();
             state.join(local_common);
 
-            self.dispatch(&state, self.buckets, &hasher)
+            self.dispatch(&state, buckets, &hasher)
         };
         let local_hashes = BloomBuckets::<T>::hashes(&local_buckets, &hasher);
 
@@ -155,14 +161,14 @@ where
         });
 
         // 5. Join the appropriate join-decompositions to each replica.
-        self.remote.join(remote_unknown);
-        self.remote.join(remote_false_positives.collect());
+        remote.join(remote_unknown);
+        remote.join(remote_false_positives.collect());
 
-        self.local.join(local_unknown);
-        self.local.join(local_false_positives);
+        local.join(local_unknown);
+        local.join(local_false_positives);
 
         // 6. Sanity Check.
-        tracker.finish(<T as Measure>::false_matches(&self.local, &self.remote));
+        tracker.finish(<T as Measure>::false_matches(local, remote));
     }
 }
 
@@ -173,7 +179,7 @@ mod tests {
 
     #[test]
     fn test_sync() {
-        let local = {
+        let mut local = {
             let mut gset = GSet::new();
             let items = "a b c d e f g h i j k l"
                 .split_whitespace()
@@ -186,7 +192,7 @@ mod tests {
             gset
         };
 
-        let remote = {
+        let mut remote = {
             let mut gset = GSet::new();
             let items = "m n o p q r s t u v w x y z"
                 .split_whitespace()
@@ -199,13 +205,11 @@ mod tests {
             gset
         };
 
-        let buckets = local.len();
-        let mut baseline = BloomBuckets::new(local, remote, 0.01, buckets);
-
         let (download, upload) = (Bandwidth::Kbps(0.5), Bandwidth::Kbps(0.5));
         let mut tracker = DefaultTracker::new(download, upload);
+        let bloom_buckets = BloomBuckets::new(0.01, 1.0);
 
-        baseline.sync(&mut tracker);
+        bloom_buckets.sync(&mut local, &mut remote, &mut tracker);
         assert_eq!(tracker.false_matches(), 0);
 
         let events = tracker.events();

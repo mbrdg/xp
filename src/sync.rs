@@ -15,10 +15,10 @@ pub mod bloom;
 pub mod bloombuckets;
 pub mod buckets;
 
-pub trait Algorithm {
+pub trait Algorithm<T> {
     type Tracker: Telemetry;
 
-    fn sync(&mut self, tracker: &mut Self::Tracker);
+    fn sync(&self, local: &mut T, remote: &mut T, tracker: &mut Self::Tracker);
 }
 
 pub trait Dispatcher<T>
