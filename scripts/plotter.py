@@ -84,17 +84,23 @@ def plot_transmitted(exp: Experiment, *, what: str) -> Figure:
 
     for algo, metrics in exp.runs.items():
         label = fmt_label(algo)
+        total_transmitted = [m.state + m.metadata for m in metrics]
 
         if what == "total":
-            transmitted = [m.state + m.metadata for m in metrics]
-            ax.plot(similarities, transmitted, "o-", label=label)
+            ax.plot(similarities, total_transmitted, "o-", label=label)
         elif what == "metadata":
             transmitted = [m.metadata for m in metrics]
             ax.plot(similarities, transmitted, "o-", label=label)
+
+            percentages = [f"{m / t:.3}" for m, t in zip(transmitted, total_transmitted)]
+            print(f"{what} {algo}", " ".join(percentages), sep="\n")
         elif what == "redundant":
             base_pts = [2 * (1 - (s / 100)) * exp.env.size for s in similarities]
             transmitted = [m.state - nr for m, nr in zip(metrics, base_pts)]
             ax.plot(similarities, transmitted, "o-", label=label)
+
+            percentages = [f"{m / t:.3}" for m, t in zip(transmitted, total_transmitted)]
+            print(f"{what} {algo}", " ".join(percentages), sep="\n")
         else:
             raise ValueError(f"Unknown param {what} for what")
 
@@ -143,7 +149,6 @@ def main():
         out_dir.mkdir(parents=True, exist_ok=True)
 
     # File reading
-    # TODO: Compute the % of metadata and redundancy over the total sent over the network
     for file in args.files:
         exps = read_experiments(file)
 
