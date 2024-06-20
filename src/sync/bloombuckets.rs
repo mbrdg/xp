@@ -1,4 +1,6 @@
-use std::{collections::HashMap, hash::RandomState, iter::zip, marker::PhantomData, mem};
+use std::{
+    collections::HashMap, fmt::Display, hash::RandomState, iter::zip, marker::PhantomData, mem,
+};
 
 use crate::{
     crdt::{Decompose, Extract, Measure},
@@ -29,6 +31,17 @@ impl<T> BloomBuckets<T> {
             lf,
             _marker: PhantomData,
         }
+    }
+}
+
+impl<T> Display for BloomBuckets<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "Bloom+Bucketing[fpr={}%,lf={}]",
+            self.fpr * 100.0,
+            self.lf
+        )
     }
 }
 

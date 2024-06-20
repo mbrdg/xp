@@ -1,4 +1,4 @@
-use std::marker::PhantomData;
+use std::{fmt::Display, marker::PhantomData};
 
 use crate::{
     crdt::{Decompose, Extract, Measure},
@@ -17,10 +17,21 @@ impl<T> Bloom<T> {
     #[inline]
     #[must_use]
     pub fn new(fpr: f64) -> Self {
+        assert!(
+            fpr > 0.0 && (0.0..1.0).contains(&fpr),
+            "fpr should be a ratio in the interval (0.0, 1.0)"
+        );
+
         Self {
             fpr,
             _marker: PhantomData,
         }
+    }
+}
+
+impl<T> Display for Bloom<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Bloom[fpr={}%]", self.fpr * 100.0)
     }
 }
 

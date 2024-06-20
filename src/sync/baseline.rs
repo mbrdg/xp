@@ -1,4 +1,4 @@
-use std::marker::PhantomData;
+use std::{fmt::Display, marker::PhantomData};
 
 use crate::{
     crdt::{Decompose, Measure},
@@ -19,6 +19,12 @@ impl<T> Baseline<T> {
         Self {
             _marker: PhantomData,
         }
+    }
+}
+
+impl<T> Display for Baseline<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Baseline")
     }
 }
 

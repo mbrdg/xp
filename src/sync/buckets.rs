@@ -1,4 +1,6 @@
-use std::{collections::HashMap, hash::RandomState, iter::zip, marker::PhantomData, mem};
+use std::{
+    collections::HashMap, fmt::Display, hash::RandomState, iter::zip, marker::PhantomData, mem,
+};
 
 use crate::{
     crdt::{Decompose, Extract, Measure},
@@ -23,6 +25,12 @@ impl<T> Buckets<T> {
             lf,
             _marker: PhantomData,
         }
+    }
+}
+
+impl<T> Display for Buckets<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Bucketing[lf={}]", self.lf)
     }
 }
 

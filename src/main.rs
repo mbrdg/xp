@@ -2,6 +2,7 @@
 
 use std::{
     env,
+    fmt::Display,
     time::{Duration, Instant},
 };
 
@@ -130,10 +131,10 @@ fn awsets_with(
 type Replica<T> = (T, Bandwidth);
 
 /// Runs the specified protocol and outputs the metrics obtained.
-fn run<T, A>(algo: &A, id: &str, similar: f64, local: Replica<T>, remote: Replica<T>)
+fn run<T, A>(algo: &A, similar: f64, local: Replica<T>, remote: Replica<T>)
 where
     T: Clone + Decompose<Decomposition = T> + Default + Extract + Measure,
-    A: Algorithm<T, Tracker = DefaultTracker>,
+    A: Algorithm<T, Tracker = DefaultTracker> + Display,
 {
     assert!(
         (0.0..=1.0).contains(&similar),
@@ -148,12 +149,12 @@ where
 
     let diffs = tracker.false_matches();
     if diffs > 0 {
-        eprintln!("{id} not totally synced with {diffs} false matches");
+        eprintln!("{algo} not totally synced with {diffs} false matches");
     }
 
     let events = tracker.events();
     println!(
-        "{id} {} {} {:.3}",
+        "{algo} {} {} {:.3}",
         events.iter().map(DefaultEvent::state).sum::<usize>(),
         events.iter().map(DefaultEvent::metadata).sum::<usize>(),
         events
@@ -184,24 +185,18 @@ where
             download.bits_per_sec()
         );
 
-        let id = "Baseline";
         let algo = Baseline::new();
-
         run(
             &algo,
-            id,
             similar,
             (local.clone(), upload),
             (remote.clone(), download),
         );
 
         for load in [0.2, 1.0, 5.0] {
-            let id = format!("Bucketing[lf={load}]");
             let protocol = Buckets::new(load);
-
             run(
                 &protocol,
-                &id,
                 similar,
                 (local.clone(), upload),
                 (remote.clone(), download),
@@ -209,12 +204,9 @@ where
         }
 
         for fpr in [0.01, 0.25] {
-            let id = format!("Bloom+Bucketing[lf=1,fpr={}%]", fpr * 100.0);
             let protocol = BloomBuckets::new(fpr, 1.0);
-
             run(
                 &protocol,
-                &id,
                 similar,
                 (local.clone(), upload),
                 (remote.clone(), download),
