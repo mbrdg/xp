@@ -87,19 +87,23 @@ def plot_transmitted(exp: Experiment, *, what: str) -> Figure:
         total_transmitted = [m.state + m.metadata for m in metrics]
 
         if what == "total":
-            ax.plot(similarities, total_transmitted, "o-", label=label)
+            ax.plot(similarities, total_transmitted, "o-", lw=0.8, label=label)
         elif what == "metadata":
             transmitted = [m.metadata for m in metrics]
-            ax.plot(similarities, transmitted, "o-", label=label)
+            ax.plot(similarities, transmitted, "o-", lw=0.8, label=label)
 
-            percentages = [f"{m / t:.3}" for m, t in zip(transmitted, total_transmitted)]
+            percentages = [
+                f"{m / t:.3}" for m, t in zip(transmitted, total_transmitted)
+            ]
             print(f"{what} {algo}", " ".join(percentages), sep="\n")
         elif what == "redundant":
             base_pts = [2 * (1 - (s / 100)) * exp.env.size for s in similarities]
             transmitted = [m.state - nr for m, nr in zip(metrics, base_pts)]
-            ax.plot(similarities, transmitted, "o-", label=label)
+            ax.plot(similarities, transmitted, "o-", lw=0.8, label=label)
 
-            percentages = [f"{m / t:.3}" for m, t in zip(transmitted, total_transmitted)]
+            percentages = [
+                f"{m / t:.3}" for m, t in zip(transmitted, total_transmitted)
+            ]
             print(f"{what} {algo}", " ".join(percentages), sep="\n")
         else:
             raise ValueError(f"Unknown param {what} for what")
@@ -126,7 +130,7 @@ def plot_time_to_sync(exp: Experiment) -> Figure:
     for algo, metrics in exp.runs.items():
         label = fmt_label(algo)
         time = [m.duration for m in metrics]
-        ax.plot(similarities, time, "o-", label=label)
+        ax.plot(similarities, time, "o-", lw=0.8, label=label)
 
     ax.legend(title="Protocols")
     return fig
