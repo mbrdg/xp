@@ -14,9 +14,8 @@ use crate::{
 
 use crdt::{Decompose, Extract};
 use rand::{
-    distributions::{Alphanumeric, DistString},
+    distributions::{Alphanumeric, Bernoulli, DistString, Distribution, Uniform},
     rngs::StdRng,
-    seq::IteratorRandom,
     SeedableRng,
 };
 
@@ -33,21 +32,24 @@ fn gsets_with(len: usize, similar: f64, rng: &mut StdRng) -> (GSet<String>, GSet
 
     let sims = (len as f64 * similar) as usize;
     let diffs = len - sims;
+    let dist = Uniform::new_inclusive(5, 80);
 
-    let mut common = GSet::new();
-    (0..sims).for_each(|_| {
-        common.insert(Alphanumeric.sample_string(rng, 80));
-    });
+    let (mut local, mut remote) = (GSet::new(), GSet::new());
 
-    let mut local = common.clone();
-    (0..diffs).for_each(|_| {
-        local.insert(Alphanumeric.sample_string(rng, 80));
-    });
+    for _ in 0..sims {
+        let len = dist.sample(rng);
+        let item = Alphanumeric.sample_string(rng, len);
+        local.insert(item.clone());
+        remote.insert(item);
+    }
 
-    let mut remote = common.clone();
-    (0..diffs).for_each(|_| {
-        remote.insert(Alphanumeric.sample_string(rng, 80));
-    });
+    for _ in 0..diffs {
+        let len = dist.sample(rng);
+        local.insert(Alphanumeric.sample_string(rng, len));
+
+        let len = dist.sample(rng);
+        remote.insert(Alphanumeric.sample_string(rng, len));
+    }
 
     assert_eq!(local.len(), len);
     assert_eq!(remote.len(), len);
@@ -65,66 +67,59 @@ fn awsets_with(
         (0.0..=1.0).contains(&similar),
         "similarity ratio should be in (0.0..=1.0)"
     );
-    assert!(
-        (0.0..0.95).contains(&del),
-        "deletion ratio should be in the in (0.0..0.95)"
-    );
 
     let sims = (len as f64 * similar) as usize;
-    let sims_dels = (sims as f64 * del) as usize;
+    let diffs = len - sims;
+
+    let dist = Uniform::new_inclusive(5, 80);
+    let ratio = Bernoulli::new(del).unwrap();
 
     let mut common = AWSet::new();
-    (0..sims).for_each(|_| {
-        common.insert(Alphanumeric.sample_string(rng, 80));
-    });
 
-    common
-        .elements()
-        .cloned()
-        .choose_multiple(rng, sims_dels)
-        .iter()
-        .for_each(|item| {
-            common.remove(item);
-        });
+    for _ in 0..sims {
+        let len = dist.sample(rng);
+        let item = Alphanumeric.sample_string(rng, len);
 
-    let diffs = len - sims;
-    let diff_dels = (diffs as f64 * del) as usize;
+        if ratio.sample(rng) {
+            common.insert(item.clone());
+            common.remove(&item);
+        } else {
+            common.insert(item);
+        }
+    }
 
-    let mut local = AWSet::new();
-    (0..diffs).for_each(|_| {
-        local.insert(Alphanumeric.sample_string(rng, 80));
-    });
+    let mut local = common.clone();
+    let mut remote = common;
 
-    local
-        .elements()
-        .cloned()
-        .choose_multiple(rng, diff_dels)
-        .iter()
-        .for_each(|item| {
-            local.remove(item);
-        });
+    for _ in 0..diffs {
+        let len = dist.sample(rng);
+        let item = Alphanumeric.sample_string(rng, len);
 
-    local.join(vec![common.clone()]);
+        if ratio.sample(rng) {
+            local.insert(item.clone());
+            local.remove(&item);
+        } else {
+            local.insert(item);
+        }
 
-    let mut remote = AWSet::new();
-    (0..diffs).for_each(|_| {
-        remote.insert(Alphanumeric.sample_string(rng, 80));
-    });
+        let len = dist.sample(rng);
+        let item = Alphanumeric.sample_string(rng, len);
 
-    remote
-        .elements()
-        .cloned()
-        .choose_multiple(rng, diff_dels)
-        .iter()
-        .for_each(|item| {
-            remote.remove(item);
-        });
+        if ratio.sample(rng) {
+            remote.insert(item.clone());
+            remote.remove(&item);
+        } else {
+            remote.insert(item);
+        }
+    }
 
-    remote.join(vec![common]);
+    let lower_bound = (0.99 - del) * len as f64;
+    let upper_bound = (1.01 - del) * len as f64;
+    let one_percent_error = lower_bound..=upper_bound;
 
-    assert_eq!(local.len(), (len as f64 * (1.0 - del)) as usize);
-    assert_eq!(remote.len(), (len as f64 * (1.0 - del)) as usize);
-    assert_eq!(local.false_matches(&remote), 2 * (diffs - diff_dels));
+    assert!(one_percent_error.contains(&(local.len() as f64)));
+    assert!(one_percent_error.contains(&(remote.len() as f64)));
+
     (local, remote)
 }
 
@@ -169,8 +164,9 @@ fn run_with<T>(similar: f64, local: T, remote: T)
 where
     T: Clone + Decompose<Decomposition = T> + Default + Extract + Measure,
 {
-    let size = <T as Measure>::size_of(&local);
-    assert_eq!(size, <T as Measure>::size_of(&remote));
+    let size_of_local = <T as Measure>::size_of(&local);
+    let size_of_remote = <T as Measure>::size_of(&remote);
+    let avg_size_of = (size_of_local + size_of_remote) / 2;
 
     let links = [
         (Bandwidth::Mbps(10.0), Bandwidth::Mbps(1.0)),
@@ -180,7 +176,7 @@ where
 
     for (upload, download) in links {
         println!(
-            "\n{size} {} {}",
+            "\n{avg_size_of} {} {}",
             upload.bits_per_sec(),
             download.bits_per_sec()
         );
@@ -234,7 +230,9 @@ fn main() {
     );
 
     let args = env::args().collect::<Vec<_>>();
-    assert_eq!(args.len(), 2);
+    if args.len() != 2 {
+        panic!("expected an argument telling which data type to use")
+    }
 
     let similarities = (0..=100)
         .step_by(5)
