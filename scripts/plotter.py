@@ -148,7 +148,7 @@ def main():
     plt.rc("font", family="serif")
 
     # Setup the out directory
-    out_dir = pathlib.Path("plots/")
+    out_dir = pathlib.Path("results/")
     if args.save:
         out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -158,13 +158,13 @@ def main():
 
         for k in ["total", "metadata", "redundant"]:
             transmitted = plot_transmitted(exps[1], what=k)
-            name = f"{pathlib.Path(file.name).stem}_transmitted_{k}.svg"
+            name = f"{pathlib.Path(file.name).stem}_transmitted_{k}.pdf"
             out = out_dir / pathlib.Path(name)
             transmitted.savefig(out, dpi=600) if args.save else plt.show()
 
         for e, k in zip(exps, ["up", "symm", "down"]):
             time = plot_time_to_sync(e)
-            name = f"{pathlib.Path(file.name).stem}_time_{k}.svg"
+            name = f"{pathlib.Path(file.name).stem}_time_{k}.pdf"
             out = out_dir / pathlib.Path(name)
             time.savefig(out, dpi=600) if args.save else plt.show()
 
