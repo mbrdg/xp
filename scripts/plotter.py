@@ -71,10 +71,20 @@ def read_experiments(f: TextIOWrapper) -> list[Experiment]:
 
 def fmt_label(label: str) -> str:
     """Simple label format to be displayed in legend"""
-    return label.replace("[", " [").replace(",", ", ")
+    label = label.replace("[", " [").replace(",", ", ")
+    name, *params = label.split(maxsplit=1)
+
+    if not params:
+        return name
+
+    short_name = ""
+    for parts in name.split("+", maxsplit=1):
+        short_name += parts[:2]
+
+    return f"{short_name} {params[0]}"
 
 
-def plot_transmitted(exp: Experiment, *, what: str) -> Figure:
+def plot_transmitted(exp: Experiment, *, what: str, verbose: bool) -> Figure:
     """Plots the transmitted data (total and metadata) over the network for each protocol"""
     fig, ax = plt.subplots(1, layout="constrained")
 
@@ -89,23 +99,24 @@ def plot_transmitted(exp: Experiment, *, what: str) -> Figure:
 
         if what == "total":
             ax.plot(similarities, total_transmitted, "o-", lw=0.8, label=label)
+
         elif what == "metadata":
             transmitted = [m.metadata for m in metrics]
             ax.plot(similarities, transmitted, "o-", lw=0.8, label=label)
 
-            percentages = [
-                f"{m / t:.3}" for m, t in zip(transmitted, total_transmitted)
-            ]
-            print(f"{what} {algo}", " ".join(percentages), sep="\n")
-        elif what == "redundant":
+            if verbose:
+                rts = [f"{m/t:.1%}" for m, t in zip(transmitted, total_transmitted)]
+                print(f"{what} {label}", " ".join(rts), sep="\n")
+
+        elif what == "redundancy":
             base_pts = [2 * (1 - (s / 100)) * exp.env.avg_size for s in similarities]
             transmitted = [max(m.state - nr, 0) for m, nr in zip(metrics, base_pts)]
             ax.plot(similarities, transmitted, "o-", lw=0.8, label=label)
 
-            percentages = [
-                f"{m / t:.3}" for m, t in zip(transmitted, total_transmitted)
-            ]
-            print(f"{what} {algo}", " ".join(percentages), sep="\n")
+            if verbose:
+                rts = [f"{m/t:.1%}" for m, t in zip(transmitted, total_transmitted)]
+                print(f"{what} {label}", " ".join(rts), sep="\n")
+
         else:
             raise ValueError(f"Unknown param {what} for what")
 
@@ -142,6 +153,8 @@ def main():
     parser = argparse.ArgumentParser(prog="plotter")
     parser.add_argument("files", nargs="*", default=("-"), type=argparse.FileType("r"))
     parser.add_argument("--save", action="store_true")
+    parser.add_argument("--show", action="store_true")
+    parser.add_argument("--quiet", "-q", action="store_false")
     args = parser.parse_args()
 
     # Set global configs for plotting
@@ -157,17 +170,25 @@ def main():
     for file in args.files:
         exps = read_experiments(file)
 
-        for k in ["total", "metadata", "redundant"]:
-            transmitted = plot_transmitted(exps[1], what=k)
+        for k in ["total", "metadata", "redundancy"]:
+            transmitted = plot_transmitted(exps[1], what=k, verbose=args.quiet)
             name = f"{pathlib.Path(file.name).stem}_transmitted_{k}.pdf"
             out = out_dir / pathlib.Path(name)
-            transmitted.savefig(out, dpi=600) if args.save else plt.show()
+
+            if args.save:
+                transmitted.savefig(out, dpi=600)
+            elif args.show:
+                plt.show()
 
         for e, k in zip(exps, ["up", "symm", "down"]):
             time = plot_time_to_sync(e)
             name = f"{pathlib.Path(file.name).stem}_time_{k}.pdf"
             out = out_dir / pathlib.Path(name)
-            time.savefig(out, dpi=600) if args.save else plt.show()
+
+            if args.save:
+                time.savefig(out, dpi=600)
+            elif args.show:
+                plt.show()
 
 
 if __name__ == "__main__":
