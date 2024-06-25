@@ -1,4 +1,4 @@
-# plotter.py
+# plots.py
 # Plots the data gathered from experiements
 
 import argparse

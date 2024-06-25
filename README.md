@@ -12,7 +12,7 @@ $ cargo run -q -r -- awset
 $ cargo run -q -r -- gset
 ```
 
-Such output can be fed into [`scrips/plotter.py`](./scripts/plotter.py)
+Such output can be fed into [`scrips/plots.py`](./scripts/plots.py)
 to produce plots using matplotlib by using the following command:
 
 ```bash
