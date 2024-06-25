@@ -5,6 +5,7 @@ from io import TextIOWrapper
 
 
 def read(f: TextIOWrapper, *, name: str) -> dict[str, list[str]]:
+    """Reads the ratios from the input file"""
     values = {}
     while True:
         fptr = f.tell()
@@ -21,7 +22,7 @@ def read(f: TextIOWrapper, *, name: str) -> dict[str, list[str]]:
         values[algo] = [p.replace("%", "\\%") for p in f.readline().rstrip().split()]
 
 
-def table(
+def textable(
     name: str, points: list[int], values: dict[str, list[str]], *, baseline: bool
 ) -> str:
     assert name in ["metadata", "redundancy"]
@@ -62,20 +63,20 @@ def table(
 
 
 def main():
+    """Produces tables in tex format"""
     parser = argparse.ArgumentParser(prog="plotter")
-    parser.add_argument("files", nargs="*", default=("-"), type=argparse.FileType("r"))
+    parser.add_argument("file", nargs="?", default=("-"), type=argparse.FileType("r"))
     args = parser.parse_args()
 
-    points = [0, 25, 50, 75, 90, 95, 100]
+    percentages = [0, 25, 50, 75, 90, 95, 100]
 
-    for file in args.files:
-        metadata = read(file, name="metadata")
-        metadata_table = table("metadata", points, metadata, baseline=False)
-        print(metadata_table)
+    metadata = read(args.file, name="metadata")
+    metadata_table = textable("metadata", percentages, metadata, baseline=False)
+    print(metadata_table)
 
-        # redundancy = read(file, name="redundant")
-        # redundancy_table = table("redundancy", points, redundancy, baseline=True)
-        # print(redundancy_table)
+    redundancy = read(args.file, name="redundancy")
+    redundancy_table = textable("redundancy", percentages, redundancy, baseline=True)
+    print(redundancy_table)
 
 
 if __name__ == "__main__":
