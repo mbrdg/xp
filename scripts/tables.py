@@ -50,18 +50,21 @@ def textable(
 
         rows.append(f"\t\t{a} & {" &".join(vals)} \\\\")
 
-    hline = "\t\t\\hline"
+    def rule(kind: str) -> str:
+        assert kind in ["top", "mid", "bottom"]
+        return f"\t\t\\{kind}rule"
+
     centering = "\t\\centering"
     caption = "\t\\caption{}"
     label = f"\t\\label{{tab:{name}}}"
 
-    tabular = (
-        [f"\t\\begin{{tabular}}{{{cols}}}", header, hline] + rows + ["\t\\end{tabular}"]
+    return "\n".join(
+        ["\\begin{table}[ht]", centering]
+        + [f"\t\\begin{{tabular}}{{{cols}}}", rule("top"), header, rule("mid")]
+        + rows
+        + [rule("bottom"), "\t\\end{tabular}"]
+        + [label, caption, "\\end{table}"]
     )
-    table = (
-        ["\\begin{table}[ht]", centering] + tabular + [label, caption, "\\end{table}"]
-    )
-    return "\n".join(table)
 
 
 def main():
