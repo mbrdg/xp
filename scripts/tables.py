@@ -2,6 +2,7 @@
 # Reads tables and makes tables from it
 import argparse
 from io import TextIOWrapper
+import pathlib
 
 
 def read(f: TextIOWrapper, *, name: str) -> dict[str, list[str]]:
@@ -15,7 +16,9 @@ def read(f: TextIOWrapper, *, name: str) -> dict[str, list[str]]:
             return values
 
         ctx, algo = parts
-        if ctx.lower() != name.lower():
+        assert ctx in ["metadata", "redundancy"]
+
+        if ctx != name:
             f.seek(fptr)
             return values
 
@@ -25,7 +28,6 @@ def read(f: TextIOWrapper, *, name: str) -> dict[str, list[str]]:
 def textable(
     name: str, points: list[int], values: dict[str, list[str]], *, baseline: bool
 ) -> str:
-    assert name in ["metadata", "redundancy"]
     assert all(0 <= x <= 100 for x in points)
 
     indexes = [p // 5 for p in points]
@@ -69,14 +71,21 @@ def main():
     args = parser.parse_args()
 
     percentages = [0, 25, 50, 75, 90, 95, 100]
+    dtype = pathlib.Path(args.file.name).stem
 
+    # Read the ratios
     metadata = read(args.file, name="metadata")
-    metadata_table = textable("metadata", percentages, metadata, baseline=False)
-    print(metadata_table)
-
     redundancy = read(args.file, name="redundancy")
-    redundancy_table = textable("redundancy", percentages, redundancy, baseline=True)
-    print(redundancy_table)
+
+    # Emit the tables in tex
+    metadata_table = textable(
+        f"{dtype}_metadata", percentages, metadata, baseline=False
+    )
+    redundancy_table = textable(
+        f"{dtype}_redundancy", percentages, redundancy, baseline=True
+    )
+
+    print(metadata_table, redundancy_table, sep="\n\n")
 
 
 if __name__ == "__main__":
