@@ -56,14 +56,14 @@ def textable(
 
     centering = "\t\\centering"
     caption = "\t\\caption{}"
-    label = f"\t\\label{{tab:{name}}}"
+    label = f"\t\\label{{tab:{name}_ratios}}"
 
     return "\n".join(
         ["\\begin{table}[ht]", centering]
         + [f"\t\\begin{{tabular}}{{{cols}}}", rule("top"), header, rule("mid")]
         + rows
         + [rule("bottom"), "\t\\end{tabular}"]
-        + [label, caption, "\\end{table}"]
+        + [caption, label, "\\end{table}"]
     )
 
 
