@@ -71,17 +71,23 @@ def read_experiments(f: TextIOWrapper) -> list[Experiment]:
 
 def fmt_label(label: str) -> str:
     """Simple label format to be displayed in legend"""
-    label = label.replace("[", " [").replace(",", ", ")
-    name, *params = label.split(maxsplit=1)
+    label = label.replace("[", " ").replace(",", " ").removesuffix("]")
+    name, *params = label.split()
 
     if not params:
         return name
 
-    short_name = ""
-    for parts in name.split("+", maxsplit=1):
-        short_name += parts[:2]
+    formatted_params = []
+    for param in params:
+        pname, value = param.split("=")
+        pname = pname.replace("fpr", "\\epsilon").replace("lf", "f_{ld}")
+        value = value.replace("%", "\\%")
+        formatted_params.append(f"${pname} = {value}$")
 
-    return f"{short_name} {params[0]}"
+    params = f"[{", ".join(formatted_params)}]"
+    name = "".join(p[:2] for p in name.split("+"))
+
+    return f"{name} {params}"
 
 
 def plot_transmitted(exp: Experiment, *, what: str, verbose: bool) -> Figure:

@@ -5,11 +5,7 @@ from io import TextIOWrapper
 
 
 def read(f: TextIOWrapper, *, name: str) -> dict[str, list[str]]:
-    def escape(s: str) -> str:
-        return s.replace("%", "\\%")
-
     values = {}
-
     while True:
         fptr = f.tell()
         parts = f.readline().rstrip().split(maxsplit=1)
@@ -17,12 +13,12 @@ def read(f: TextIOWrapper, *, name: str) -> dict[str, list[str]]:
         if not parts:
             return values
 
-        if parts[0].lower() != name.lower():
+        ctx, algo = parts
+        if ctx.lower() != name.lower():
             f.seek(fptr)
             return values
 
-        algo = escape(parts[1])
-        values[algo] = [escape(p) for p in f.readline().rstrip().split()]
+        values[algo] = [p.replace("%", "\\%") for p in f.readline().rstrip().split()]
 
 
 def table(
