@@ -189,24 +189,26 @@ where
             (remote.clone(), download),
         );
 
-        for load in [0.2, 1.0, 5.0] {
-            let protocol = Buckets::new(load);
+        for lf in [0.2, 1.0, 5.0] {
+            let algo = Buckets::new(lf);
             run(
-                &protocol,
+                &algo,
                 similar,
                 (local.clone(), upload),
                 (remote.clone(), download),
             );
         }
 
-        for fpr in [0.01, 0.25] {
-            let protocol = BloomBuckets::new(fpr, 1.0);
-            run(
-                &protocol,
-                similar,
-                (local.clone(), upload),
-                (remote.clone(), download),
-            );
+        for lf in [1.0, 0.2] {
+            for fpr in [0.01, 0.25] {
+                let algo = BloomBuckets::new(fpr, lf);
+                run(
+                    &algo,
+                    similar,
+                    (local.clone(), upload),
+                    (remote.clone(), download),
+                );
+            }
         }
     }
 }
