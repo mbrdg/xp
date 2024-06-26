@@ -4,7 +4,7 @@
 import argparse
 from collections import defaultdict
 from io import TextIOWrapper
-import pathlib
+from pathlib import Path
 from typing import NamedTuple
 from matplotlib.figure import Figure
 import matplotlib.pyplot as plt
@@ -23,15 +23,48 @@ class Metrics(NamedTuple):
     duration: float
 
 
+class Algorithm(NamedTuple):
+    name: str
+    params: dict[str, str]
+
+    def __hash__(self) -> int:
+        return hash((self.name, frozenset(self.params.items())))
+
+    @property
+    def lf(self) -> float:
+        return float(self.params["f_{ld}"])
+
+    def is_blbu(self) -> bool:
+        return self.name == "Bloom+Bucketing"
+
+
 class Experiment(NamedTuple):
     env: Header
-    runs: dict[str, list[Metrics]]
+    runs: dict[Algorithm, list[Metrics]]
 
 
 similarities = range(0, 101, 5)
 percent_formatter = ticker.PercentFormatter()
 byte_formatter = ticker.EngFormatter(unit="B")
 bit_formatter = ticker.EngFormatter(unit="b")
+
+
+def read_algorithm(k: str) -> Algorithm:
+    """
+    Parses an algorithm key.
+    This function assumes that the input is not malformed.
+    """
+    name, *params = k.replace("[", " ").replace(",", " ").removesuffix("]").split()
+    formatted = {}
+
+    for param in params:
+        pname, value = param.split("=")
+        if pname == "fpr":
+            formatted["\\epsilon"] = value.replace("%", "\\%")
+        elif pname == "lf":
+            formatted["f_{ld}"] = value
+
+    return Algorithm(name, formatted)
 
 
 def read_experiments(f: TextIOWrapper) -> list[Experiment]:
@@ -59,7 +92,9 @@ def read_experiments(f: TextIOWrapper) -> list[Experiment]:
 
             while parts := f.readline().rstrip().split():
                 algo, *metrics = parts
+                algo = read_algorithm(algo)
                 metrics = Metrics(int(metrics[0]), int(metrics[1]), float(metrics[2]))
+
                 m[algo].append(metrics)
 
     assert len(headers) == 3
@@ -69,24 +104,13 @@ def read_experiments(f: TextIOWrapper) -> list[Experiment]:
     return [Experiment(*p) for p in zip(headers, collector)]
 
 
-def fmt_label(label: str) -> str:
+def fmt_label(label: Algorithm) -> str:
     """Simple label format to be displayed in legend"""
-    label = label.replace("[", " ").replace(",", " ").removesuffix("]")
-    name, *params = label.split()
+    if not label.params:
+        return label.name
 
-    if not params:
-        return name
-
-    formatted_params = []
-    for param in params:
-        pname, value = param.split("=")
-        pname = pname.replace("fpr", "\\epsilon").replace("lf", "f_{ld}")
-        value = value.replace("%", "\\%")
-        formatted_params.append(f"${pname} = {value}$")
-
-    params = f"[{", ".join(formatted_params)}]"
-    name = "".join(p[:2] for p in name.split("+"))
-
+    name = "".join(p[:2] for p in label.name.split("+"))
+    params = f"[{", ".join(f"${k} = {v}$" for k, v in label.params.items())}]"
     return f"{name} {params}"
 
 
@@ -126,11 +150,7 @@ def plot_transmitted(exp: Experiment, *, what: str, verbose: bool) -> Figure:
         else:
             raise ValueError(f"Unknown param {what} for what")
 
-    # remove the unnecessary line for Baseline which is not considered to send extra metadata
-    if what == "metadata":
-        ax.lines[0].remove()
-
-    ax.legend(title="Protocol")
+    ax.legend(title="Algorithms")
     return fig
 
 
@@ -150,7 +170,7 @@ def plot_time_to_sync(exp: Experiment) -> Figure:
         time = [m.duration for m in metrics]
         ax.plot(similarities, time, "o-", lw=0.8, label=label)
 
-    ax.legend(title="Protocols")
+    ax.legend(title="Algorithms")
     return fig
 
 
@@ -168,33 +188,59 @@ def main():
     plt.rc("font", family="serif")
 
     # Setup the out directory
-    out_dir = pathlib.Path("results/")
+    out_dir = Path("results/")
     if args.save:
         out_dir.mkdir(parents=True, exist_ok=True)
 
-    # File reading
+    def save_or_show(fig: Figure, fname: str):
+        if args.save:
+            fig.savefig(out_dir / fname, dpi=600)
+        if args.show:
+            plt.show()
+
     for file in args.files:
+        # File reading
         exps = read_experiments(file)
 
-        for k in ["total", "metadata", "redundancy"]:
-            transmitted = plot_transmitted(exps[1], what=k, verbose=args.quiet)
-            name = f"{pathlib.Path(file.name).stem}_transmitted_{k}.pdf"
-            out = out_dir / pathlib.Path(name)
+        # Plot the core experiments
+        for k in ("total", "metadata", "redundancy"):
+            runs = {
+                k: v
+                for k, v in exps[1].runs.items()
+                if (not k.is_blbu()) or k.lf == 1.0
+            }
+            exp = Experiment(exps[1].env, runs)
 
-            if args.save:
-                transmitted.savefig(out, dpi=600)
-            elif args.show:
-                plt.show()
+            transmitted = plot_transmitted(exp, what=k, verbose=args.quiet)
+            name = f"{Path(file.name).stem}_transmitted_{k}.pdf"
+            save_or_show(transmitted, name)
 
+        # Plot the blbu experiments
+        for k in ("total", "metadata", "redundancy"):
+            runs = {k: v for k, v in exps[1].runs.items() if k.is_blbu()}
+            exp = Experiment(exps[1].env, runs)
+
+            transmitted = plot_transmitted(exp, what=k, verbose=False)
+            name = f"{Path(file.name).stem}_blbu_transmitted_{k}.pdf"
+            save_or_show(transmitted, name)
+
+        # Plot the core time experiments
         for e, k in zip(exps, ["up", "symm", "down"]):
-            time = plot_time_to_sync(e)
-            name = f"{pathlib.Path(file.name).stem}_time_{k}.pdf"
-            out = out_dir / pathlib.Path(name)
+            runs = {k: v for k, v in e.runs.items() if not k.is_blbu() or k.lf == 1.0}
+            e = Experiment(e.env, runs)
 
-            if args.save:
-                time.savefig(out, dpi=600)
-            elif args.show:
-                plt.show()
+            time = plot_time_to_sync(e)
+            name = f"{Path(file.name).stem}_time_{k}.pdf"
+            save_or_show(time, name)
+
+        # Plot the blbu time experiments
+        for e, k in zip(exps, ["up", "symm", "down"]):
+            runs = {k: v for k, v in e.runs.items() if k.is_blbu()}
+            e = Experiment(e.env, runs)
+
+            time = plot_time_to_sync(e)
+            name = f"{Path(file.name).stem}_blbu_time_{k}.pdf"
+            save_or_show(time, name)
 
 
 if __name__ == "__main__":
