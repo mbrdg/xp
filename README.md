@@ -16,7 +16,16 @@ Such output can be fed into [`scrips/plots.py`](./scripts/plots.py)
 to produce plots using matplotlib by using the following command:
 
 ```bash
-$ python scripts/plotter.py --save awset_logs.txt gset_logs.txt
+$ python scripts/plotter.py --help
+```
+
+If `--quiet` is not enables in the script above,
+then its output can be used to produce tables in TeX format by
+[`scripts/tables.py`](./scripts/tables.py).
+The command is the following:
+
+```bash
+$ python scripts/tables.py --help
 ```
 
 > [mbrdg](mailto:migb.rodrigues+github@gmail.com)
