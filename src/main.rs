@@ -199,8 +199,8 @@ where
             );
         }
 
-        for lf in [1.0, 0.2] {
-            for fpr in [0.01, 0.25] {
+        for fpr in [0.01, 0.25] {
+            for lf in [1.0, 0.2] {
                 let algo = BloomBuckets::new(fpr, lf);
                 run(
                     &algo,
