@@ -114,7 +114,7 @@ def fmt_label(label: Algorithm) -> str:
     return f"{name} {params}"
 
 
-def plot_transmitted(exp: Experiment, *, what: str, verbose: bool) -> Figure:
+def plot_transmitted(exp: Experiment, *, what: str) -> Figure:
     """Plots the transmitted data (total and metadata) over the network for each protocol"""
     fig, ax = plt.subplots(1, layout="constrained")
 
@@ -125,33 +125,40 @@ def plot_transmitted(exp: Experiment, *, what: str, verbose: bool) -> Figure:
 
     for algo, metrics in exp.runs.items():
         label = fmt_label(algo)
-        total_transmitted = [m.state + m.metadata for m in metrics]
 
         if what == "total":
-            ax.plot(similarities, total_transmitted, "o-", lw=0.8, label=label)
-
+            transmitted = [m.state + m.metadata for m in metrics]
+            ax.plot(similarities, transmitted, "o-", lw=0.8, label=label)
         elif what == "metadata":
             transmitted = [m.metadata for m in metrics]
             ax.plot(similarities, transmitted, "o-", lw=0.8, label=label)
-
-            if verbose:
-                rts = [f"{m/t:.1%}" for m, t in zip(transmitted, total_transmitted)]
-                print(f"{what} {label}", " ".join(rts), sep="\n")
-
         elif what == "redundancy":
             base_pts = [2 * (1 - (s / 100)) * exp.env.avg_size for s in similarities]
             transmitted = [max(m.state - nr, 0) for m, nr in zip(metrics, base_pts)]
             ax.plot(similarities, transmitted, "o-", lw=0.8, label=label)
-
-            if verbose:
-                rts = [f"{m/t:.1%}" for m, t in zip(transmitted, total_transmitted)]
-                print(f"{what} {label}", " ".join(rts), sep="\n")
-
         else:
             raise ValueError(f"Unknown param {what} for what")
 
     ax.legend(title="Algorithms")
     return fig
+
+
+def print_transmission_ratios(exp: Experiment, *, what: str):
+    """Prints the ratios of metadata and redundancy against the total transmitted."""
+    for algo, metrics in exp.runs.items():
+        label = fmt_label(algo)
+        total = [m.state + m.metadata for m in metrics]
+
+        if what == "metadata":
+            collected = [m.metadata for m in metrics]
+        elif what == "redundancy":
+            base_points = [2 * (1 - (s / 100)) * exp.env.avg_size for s in similarities]
+            collected = [max(m.state - nr, 0) for m, nr in zip(metrics, base_points)]
+        else:
+            raise ValueError(f"Unknown value parameter {what} for what")
+
+        rts = [f"{m / t:.1%}" for m, t in zip(collected, total)]
+        print(f"{what} {label}", " ".join(rts), sep="\n")
 
 
 def plot_time_to_sync(exp: Experiment) -> Figure:
@@ -180,7 +187,7 @@ def main():
     parser.add_argument("files", nargs="*", default=("-"), type=argparse.FileType("r"))
     parser.add_argument("--save", action="store_true")
     parser.add_argument("--show", action="store_true")
-    parser.add_argument("--quiet", "-q", action="store_false")
+    parser.add_argument("--quiet", "-q", action="store_true")
     args = parser.parse_args()
 
     # Set global configs for plotting
@@ -202,43 +209,48 @@ def main():
         # File reading
         exps = read_experiments(file)
 
-        # Plot the core experiments
+        # Display the ratios
+        if not args.quiet:
+            for k in ("metadata", "redundancy"):
+                print_transmission_ratios(exps[1], what=k)
+
         for k in ("total", "metadata", "redundancy"):
+            # Plot the core experiments
             runs = {
                 k: v
                 for k, v in exps[1].runs.items()
                 if (not k.is_blbu()) or k.lf == 1.0
             }
-            exp = Experiment(exps[1].env, runs)
+            core = Experiment(exps[1].env, runs)
 
-            transmitted = plot_transmitted(exp, what=k, verbose=args.quiet)
+            transmitted = plot_transmitted(core, what=k)
             name = f"{Path(file.name).stem}_transmitted_{k}.pdf"
             save_or_show(transmitted, name)
 
-        # Plot the blbu experiments
-        for k in ("total", "metadata", "redundancy"):
+            # Plot the blbu experiments
             runs = {k: v for k, v in exps[1].runs.items() if k.is_blbu()}
-            exp = Experiment(exps[1].env, runs)
+            blbu = Experiment(exps[1].env, runs)
 
-            transmitted = plot_transmitted(exp, what=k, verbose=False)
+            transmitted = plot_transmitted(blbu, what=k)
             name = f"{Path(file.name).stem}_blbu_transmitted_{k}.pdf"
             save_or_show(transmitted, name)
 
-        # Plot the core time experiments
-        for e, k in zip(exps, ["up", "symm", "down"]):
-            runs = {k: v for k, v in e.runs.items() if not k.is_blbu() or k.lf == 1.0}
-            e = Experiment(e.env, runs)
+        for exp, k in zip(exps, ["up", "symm", "down"]):
+            # Plot the core time experiments
+            runs = {
+                k: v for k, v in exp.runs.items() if (not k.is_blbu()) or k.lf == 1.0
+            }
+            core = Experiment(exp.env, runs)
 
-            time = plot_time_to_sync(e)
+            time = plot_time_to_sync(core)
             name = f"{Path(file.name).stem}_time_{k}.pdf"
             save_or_show(time, name)
 
-        # Plot the blbu time experiments
-        for e, k in zip(exps, ["up", "symm", "down"]):
-            runs = {k: v for k, v in e.runs.items() if k.is_blbu()}
-            e = Experiment(e.env, runs)
+            # Plot the blbu time experiments
+            runs = {k: v for k, v in exp.runs.items() if k.is_blbu()}
+            blbu = Experiment(exp.env, runs)
 
-            time = plot_time_to_sync(e)
+            time = plot_time_to_sync(blbu)
             name = f"{Path(file.name).stem}_blbu_time_{k}.pdf"
             save_or_show(time, name)
 
