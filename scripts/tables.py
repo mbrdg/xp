@@ -25,9 +25,7 @@ def read(f: TextIOWrapper, *, name: str) -> dict[str, list[str]]:
         values[algo] = [p.replace("%", "\\%") for p in f.readline().rstrip().split()]
 
 
-def textable(
-    name: str, points: list[int], values: dict[str, list[str]], *, baseline: bool
-) -> str:
+def textable(name: str, points: list[int], values: dict[str, list[str]]) -> str:
     assert all(0 <= x <= 100 for x in points)
 
     indexes = [p // 5 for p in points]
@@ -42,9 +40,6 @@ def textable(
 
     rows = []
     for a, v in values.items():
-        if a == "Baseline" and not baseline:
-            continue
-
         vals = [p for i, p in enumerate(v) if i in indexes]
         assert len(points) == len(vals)
 
@@ -59,7 +54,7 @@ def textable(
     label = f"\t\\label{{tab:{name}_ratios}}"
 
     return "\n".join(
-        ["\\begin{table}[ht]", centering]
+        ["\\begin{table}[h]", centering]
         + [f"\t\\begin{{tabular}}{{{cols}}}", rule("top"), header, rule("mid")]
         + rows
         + [rule("bottom"), "\t\\end{tabular}"]
@@ -81,12 +76,8 @@ def main():
     redundancy = read(args.file, name="redundancy")
 
     # Emit the tables in tex
-    metadata_table = textable(
-        f"{dtype}_metadata", percentages, metadata, baseline=False
-    )
-    redundancy_table = textable(
-        f"{dtype}_redundancy", percentages, redundancy, baseline=True
-    )
+    metadata_table = textable(f"{dtype}_metadata", percentages, metadata)
+    redundancy_table = textable(f"{dtype}_redundancy", percentages, redundancy)
 
     print(metadata_table, redundancy_table, sep="\n\n")
 
