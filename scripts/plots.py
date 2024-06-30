@@ -9,6 +9,7 @@ from typing import NamedTuple
 from matplotlib.figure import Figure
 import matplotlib.pyplot as plt
 from matplotlib import ticker
+from matplotlib.typing import ColorType
 
 
 class Header(NamedTuple):
@@ -114,7 +115,9 @@ def fmt_label(label: Algorithm) -> str:
     return f"{name} {params}"
 
 
-def plot_transmitted(exp: Experiment, *, what: str) -> Figure:
+def plot_transmitted(
+    exp: Experiment, what: str, colors: dict[Algorithm, ColorType]
+) -> Figure:
     """Plots the transmitted data (total and metadata) over the network for each protocol"""
     fig, ax = plt.subplots(1, layout="constrained")
 
@@ -124,18 +127,19 @@ def plot_transmitted(exp: Experiment, *, what: str) -> Figure:
     ax.set(xlabel="Similarity", xmargin=0, ylabel=f"{what.title()} (Bytes)")
 
     for algo, metrics in exp.runs.items():
+        color = colors[algo]
         label = fmt_label(algo)
 
         if what == "total":
             transmitted = [m.state + m.metadata for m in metrics]
-            ax.plot(similarities, transmitted, "o-", lw=0.8, label=label)
+            ax.plot(similarities, transmitted, "o-", c=color, lw=0.8, label=label)
         elif what == "metadata":
             transmitted = [m.metadata for m in metrics]
-            ax.plot(similarities, transmitted, "o-", lw=0.8, label=label)
+            ax.plot(similarities, transmitted, "o-", c=color, lw=0.8, label=label)
         elif what == "redundancy":
             base_pts = [2 * (1 - (s / 100)) * exp.env.avg_size for s in similarities]
             transmitted = [max(m.state - nr, 0) for m, nr in zip(metrics, base_pts)]
-            ax.plot(similarities, transmitted, "o-", lw=0.8, label=label)
+            ax.plot(similarities, transmitted, "o-", c=color, lw=0.8, label=label)
         else:
             raise ValueError(f"Unknown param {what} for what")
 
@@ -143,7 +147,7 @@ def plot_transmitted(exp: Experiment, *, what: str) -> Figure:
     return fig
 
 
-def print_transmission_ratios(exp: Experiment, *, what: str):
+def print_transmission_ratios(exp: Experiment, what: str):
     """Prints the ratios of metadata and redundancy against the total transmitted."""
     for algo, metrics in exp.runs.items():
         label = fmt_label(algo)
@@ -161,7 +165,7 @@ def print_transmission_ratios(exp: Experiment, *, what: str):
         print(f"{what} {label}", " ".join(rts), sep="\n")
 
 
-def plot_time_to_sync(exp: Experiment) -> Figure:
+def plot_time_to_sync(exp: Experiment, colors: dict[Algorithm, ColorType]) -> Figure:
     """Plots the time to sync on different link configurations"""
     fig, ax = plt.subplots(layout="constrained")
 
@@ -173,9 +177,10 @@ def plot_time_to_sync(exp: Experiment) -> Figure:
     ax.set(xlabel="Similarity", xmargin=0, ylabel=ylabel)
 
     for algo, metrics in exp.runs.items():
+        color = colors[algo]
         label = fmt_label(algo)
         time = [m.duration for m in metrics]
-        ax.plot(similarities, time, "o-", lw=0.8, label=label)
+        ax.plot(similarities, time, "o-", c=color, lw=0.8, label=label)
 
     ax.legend(title="Algorithms")
     return fig
@@ -202,17 +207,22 @@ def main():
     def save_or_show(fig: Figure, fname: str):
         if args.save:
             fig.savefig(out_dir / fname, dpi=600)
+            plt.close(fig)
         if args.show:
             plt.show()
 
     for file in args.files:
         # File reading
         exps = read_experiments(file)
+        colors = {
+            a: p["color"]
+            for a, p in zip(exps[1].runs.keys(), plt.rcParams["axes.prop_cycle"])
+        }
 
         # Display the ratios
         if not args.quiet:
             for k in ("metadata", "redundancy"):
-                print_transmission_ratios(exps[1], what=k)
+                print_transmission_ratios(exps[1], k)
 
         for k in ("total", "metadata", "redundancy"):
             # Plot the core experiments
@@ -223,7 +233,7 @@ def main():
             }
             core = Experiment(exps[1].env, runs)
 
-            transmitted = plot_transmitted(core, what=k)
+            transmitted = plot_transmitted(core, k, colors)
             name = f"{Path(file.name).stem}_transmitted_{k}.pdf"
             save_or_show(transmitted, name)
 
@@ -231,7 +241,7 @@ def main():
             runs = {k: v for k, v in exps[1].runs.items() if k.is_blbu()}
             blbu = Experiment(exps[1].env, runs)
 
-            transmitted = plot_transmitted(blbu, what=k)
+            transmitted = plot_transmitted(blbu, k, colors)
             name = f"{Path(file.name).stem}_blbu_transmitted_{k}.pdf"
             save_or_show(transmitted, name)
 
@@ -242,7 +252,7 @@ def main():
             }
             core = Experiment(exp.env, runs)
 
-            time = plot_time_to_sync(core)
+            time = plot_time_to_sync(core, colors)
             name = f"{Path(file.name).stem}_time_{k}.pdf"
             save_or_show(time, name)
 
@@ -250,7 +260,7 @@ def main():
             runs = {k: v for k, v in exp.runs.items() if k.is_blbu()}
             blbu = Experiment(exp.env, runs)
 
-            time = plot_time_to_sync(blbu)
+            time = plot_time_to_sync(blbu, colors)
             name = f"{Path(file.name).stem}_blbu_time_{k}.pdf"
             save_or_show(time, name)
 
