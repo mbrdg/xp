@@ -226,13 +226,13 @@ where
     }
 }
 
-impl<T> Extract<T> for GSet<T>
+impl<'b, T> Extract<&'b T> for GSet<T>
 where
     T: Hash,
 {
-    type Decomposition<'a> = Delta<'a, T> where T: 'a;
+    type Decomposition<'a> = Delta<'b, T> where T: 'a;
 
-    fn extract<'a>(delta: &Self::Decomposition<'a>) -> anyhow::Result<&'a T> {
+    fn extract(delta: &Self::Decomposition<'b>) -> anyhow::Result<&'b T> {
         ensure!(delta.elems.len() == 1);
         match delta.elems.first() {
             Some(value) => Ok(value),
@@ -277,7 +277,7 @@ mod tests {
         let irredudant_join_decomposition = set.split();
         assert_eq!(set.len(), irredudant_join_decomposition.len());
 
-        // Check if all the generated deltas have a single item
+        // Check if all the generated deltas have a single value
         assert!(irredudant_join_decomposition
             .iter()
             .all(|d| d.elems.len() == 1));

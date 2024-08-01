@@ -67,8 +67,7 @@ where
     /// Delta generic associated type
     type Decomposition<'a>
     where
-        Self: 'a,
-        T: 'a;
+        Self: 'a;
 
-    fn extract<'a>(delta: &Self::Decomposition<'a>) -> anyhow::Result<&'a T>;
+    fn extract(delta: &Self::Decomposition<'_>) -> anyhow::Result<T>;
 }
