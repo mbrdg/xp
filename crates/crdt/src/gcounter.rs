@@ -262,7 +262,12 @@ where
     type Decomposition<'a> = Delta<'b, I> where I: 'a;
 
     fn extract(delta: &Self::Decomposition<'b>) -> anyhow::Result<(&'b I, &'b u64)> {
-        ensure!(delta.elems.len() == 1);
+        let values = delta.elems.len();
+        ensure!(
+            values == 1,
+            "decomposition should contain a single value, but instead got {values} values"
+        );
+
         match delta.elems.first() {
             Some(value) => Ok(*value),
             None => unreachable!(),
