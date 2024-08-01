@@ -7,12 +7,18 @@ use crate::{Decompose, Extract};
 
 /// A GSet is a grow-only state and a state-based CRDTs, arguably, the simplest of them all.
 /// As its name suggests, this data type only supports insertion and membership querying.
-/// Its implementation is a wrapper around a [`HashSet`] from the standard library.
+///
+/// # Implementation
+///
+/// The implementation of the [`GSet`] wraps a [`HashSet`] from the standard library and restricts
+/// the interface to contain the appropriate methods.
+///
+/// [`HashSet`]: std::collections::HashSet
 ///
 /// # Example
 ///
 /// ```
-/// use crdt::gset::GSet;
+/// use crdt::GSet;
 ///
 /// let mut set = GSet::new();
 ///
@@ -34,17 +40,33 @@ pub struct GSet<T> {
 /// [`GSet`] using the trait [`From`].
 ///
 /// [`From`]: std::convert::From
+///
+/// # Tips
+///
+/// [`Delta`] can be used when it is required to clone a given state.
+///
+/// ```
+/// use crdt::GSet;
+///
+/// let mut set = GSet::new();
+///
+/// set.insert("a");
+/// set.insert("b");
+/// set.insert("c");
+///
+/// let delta = set.as_delta();
+///
+/// let copy = GSet::from(delta);   // The state of set is cloned here!
+/// assert_eq!(set, copy);
+/// ```
 #[derive(Clone)]
 pub struct Delta<'a, T> {
     set: &'a GSet<T>,
-    pub elems: Vec<&'a T>,
+    elems: Vec<&'a T>,
 }
 
 impl<T> GSet<T> {
-    /// Creates an empty `Gset`.
-    /// Essentially, this CRDT is a wrapper for an [`HashSet`] from the standard library.
-    ///
-    /// [`HashSet`]: std::collections::HashSet
+    /// Creates an empty [`GSet`], i.e., withtout any values.
     ///
     /// # Performance
     ///
@@ -54,6 +76,18 @@ impl<T> GSet<T> {
     /// project.
     ///
     /// [`fxhash`]: fxhash
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use crdt::GSet;
+    ///
+    /// // Create an empty set
+    /// let set: GSet<i32> = GSet::new();
+    ///
+    /// assert!(set.is_empty());
+    /// assert_eq!(set.len(), 0);
+    /// ```
     #[inline]
     #[must_use]
     pub fn new() -> Self {
@@ -70,8 +104,9 @@ impl<T> GSet<T> {
     /// [`HashSet`]: std::collections::HashSet
     ///
     /// # Examples
+    ///
     /// ```
-    /// use crdt::gset::GSet;
+    /// use crdt::GSet;
     ///
     /// let mut set = GSet::new();
     /// set.insert("a");
@@ -140,7 +175,7 @@ where
     /// # Examples
     ///
     /// ```
-    /// use crdt::gset::GSet;
+    /// use crdt::GSet;
     ///
     /// let mut set = GSet::new();
     ///
@@ -245,7 +280,7 @@ where
 mod tests {
     use fxhash::FxHashSet;
 
-    use crate::{gset::GSet, Decompose, Extract};
+    use crate::{Decompose, Extract, GSet};
 
     #[test]
     fn insertion_and_membership_test() {
