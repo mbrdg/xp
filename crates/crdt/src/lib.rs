@@ -1,6 +1,10 @@
 #![allow(dead_code)]
 
-pub mod gset;
+mod gcounter;
+mod gset;
+
+pub use crate::gcounter::GCounter;
+pub use crate::gset::GSet;
 
 use std::hash::Hash;
 
@@ -8,11 +12,9 @@ use std::hash::Hash;
 /// join-decomposditions. This trait provides a way for clients to use these in the way that they
 /// wish.
 pub trait Decompose<T> {
-    /// Delta generic associated type
     type Decomposition<'a>
     where
-        Self: 'a,
-        T: 'a;
+        Self: 'a;
 
     /// Provides the only irredundant join-decompositions possible over the `self`.
     ///
@@ -26,7 +28,7 @@ pub trait Decompose<T> {
     /// the data type itself. For other data types (and also for [`GSet`]'s) use the following.
     ///
     /// ```
-    /// use crdt::{Decompose, gset::GSet};
+    /// use crdt::{Decompose, GSet};
     ///
     /// let mut set = GSet::default();
     /// set.insert("a");
@@ -57,14 +59,13 @@ pub trait Decompose<T> {
 /// `Decomposition` is empty or contains more than one item, an error is returned back to the
 /// caller.
 ///
-/// Notice that it imposes a trait bound on the type T, which represents the output.
-/// The values extracted are intended to be hashed to enable efficient state-based CRDT
-/// synchronization.
+/// Notice that it imposes a trait bound on the type T, which represents the output type for the
+/// scenario where the extraction succeds. The values extracted are intended to be hashed to enable
+/// efficient digest-driven state-based CRDT synchronization.
 pub trait Extract<T>
 where
     T: Hash,
 {
-    /// Delta generic associated type
     type Decomposition<'a>
     where
         Self: 'a;
