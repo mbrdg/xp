@@ -10,3 +10,4 @@ rand = "0.8.4"
 bitvec = "1"
 either = "1.12.0"
 crdt = { path  = "crates/crdt" }
+bloom = { path = "crates/bloom" }
