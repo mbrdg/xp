@@ -1,4 +1,8 @@
-use std::{borrow::Borrow, collections::hash_set::Iter, hash::Hash};
+use std::{
+    borrow::Borrow,
+    collections::hash_set::{IntoIter, Iter},
+    hash::Hash,
+};
 
 use anyhow::{ensure, Ok};
 use fxhash::FxHashSet;
@@ -221,6 +225,15 @@ where
         Self {
             inner: FxHashSet::from_iter(value.elems.into_iter().cloned()),
         }
+    }
+}
+
+impl<T> IntoIterator for GSet<T> {
+    type Item = T;
+    type IntoIter = IntoIter<T>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.inner.into_iter()
     }
 }
 
