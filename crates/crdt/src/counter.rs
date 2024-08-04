@@ -169,17 +169,35 @@ where
     /// assert_eq!(counter.count_of(&"a"), Some(2));
     /// ```
     pub fn increment(&mut self, id: &I) -> Delta<'_, I> {
+        self.add(id, 1)
+    }
+
+    /// Adds `value` to an `id` and returns a [`Delta`] that contains the `id` and its corresponding
+    /// counter. If the `id` is not present in the counter, a new entry is initialized with `value`.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use crdt::GCounter;
+    ///
+    /// let mut counter = GCounter::new();
+    /// assert_eq!(counter.count_of(&"a"), None);
+    ///
+    /// counter.add(&"a", 42);
+    /// assert_eq!(counter.count_of(&"a"), Some(42));
+    /// ```
+    pub fn add(&mut self, id: &I, value: u64) -> Delta<'_, I> {
         match self.inner.get_mut(id) {
-            Some(value) => *value += 1,
+            Some(count) => *count += value,
             None => {
-                self.inner.insert(id.clone(), 1);
+                self.inner.insert(id.clone(), value);
             }
-        };
+        }
 
         let entry = self
             .inner
             .get_key_value(id)
-            .expect("map must contain the key `id`");
+            .expect("key not found in counter");
         Delta {
             counter: self,
             elems: vec![entry],
@@ -282,7 +300,7 @@ mod tests {
     use crate::{Decompose, Extract, GCounter};
 
     #[test]
-    fn incrementation_and_counting_test() {
+    fn addition_and_counting_test() {
         let mut counter = GCounter::new();
         assert_eq!(counter.count(), 0, "empty counter different than 0");
 
@@ -294,6 +312,10 @@ mod tests {
         assert_eq!(counter.count_of(&"a"), Some(2));
         assert_eq!(counter.count_of(&"b"), Some(1));
         assert_eq!(counter.count_of(&"c"), None);
+
+        counter.add(&"c", 42);
+        assert_eq!(counter.count_of(&"c"), Some(42));
+        assert_eq!(counter.count(), 45);
     }
 
     #[test]
