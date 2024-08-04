@@ -1,8 +1,10 @@
 #![allow(dead_code)]
 
+mod causal;
 mod gcounter;
 mod gset;
 
+pub use crate::causal::{Dot, DotContext};
 pub use crate::gcounter::GCounter;
 pub use crate::gset::GSet;
 
